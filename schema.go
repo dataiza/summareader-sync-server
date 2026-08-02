@@ -48,6 +48,13 @@ func ensureAccounts(app core.App) error {
 	// Opaque. Set at pairing time; the server never derives meaning from it.
 	c.Fields.Add(&core.TextField{Name: "label", Max: 200})
 
+	// The deletion receipt. No user content — just enough for another device
+	// to be told "deleted from your desktop on 20 July" instead of being left
+	// to guess why its log is empty.
+	c.Fields.Add(&core.TextField{Name: "deleted_at", Max: 40})
+	c.Fields.Add(&core.TextField{Name: "deleted_by", Max: 200})
+	c.Fields.Add(&core.BoolField{Name: "deleted_replacement"})
+
 	// No collection rules: every route is a Go handler that checks the device
 	// token itself. Rules are evaluated per record and cannot express "this
 	// counter must move in the same transaction as that insert".

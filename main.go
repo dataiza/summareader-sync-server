@@ -51,6 +51,10 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.GET("/blob/{name}", handleGetBlob)
 	e.Router.GET("/subscribe", handleSubscribe)
 
+	// Deletion is a separate, deliberate operation — never folded into
+	// switching servers and never into closing an account.
+	e.Router.POST("/wipe", handleWipe)
+
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
 	e.Router.GET("/instance", handleInstance)
@@ -205,10 +209,48 @@ func handleSubscribe(e *core.RequestEvent) error {
 		})
 	}
 
+	// The receipt rides along, so a device that finds an empty log learns why
+	// in the same round trip that told it the log is empty.
+	receipt, _ := receiptFor(e.App, accountID)
+
 	// Long-polling rather than a websocket for now: the client already polls
 	// on resume, and a socket is a reconnection state machine to maintain for
 	// a message that says "poll now".
-	return e.JSON(http.StatusOK, map[string]any{"head": account.GetInt("seq")})
+	return e.JSON(http.StatusOK, map[string]any{
+		"head":    account.GetInt("seq"),
+		"receipt": receipt,
+	})
+}
+
+type wipeRequest struct {
+	DeviceName  string `json:"device_name"`
+	Replacement bool   `json:"replacement"`
+}
+
+func handleWipe(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body wipeRequest
+	_ = e.BindBody(&body)
+	if body.DeviceName == "" {
+		body.DeviceName = "another device"
+	}
+
+	result, err := wipeAccount(e.App, accountID, body.DeviceName, body.Replacement)
+	if err != nil {
+		// Reports the partial result alongside the failure rather than a bare
+		// error: "we removed some of it" is actionable, "it failed" is not.
+		return e.JSON(http.StatusInternalServerError, map[string]any{
+			"error":  err.Error(),
+			"result": result,
+		})
+	}
+	return e.JSON(http.StatusOK, result)
 }
 
 // handleInstance identifies this server so a client can distinguish an empty
