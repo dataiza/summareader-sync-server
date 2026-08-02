@@ -1,4 +1,4 @@
-module github.com/p4ulie/allreader/server
+module github.com/p4ulie/allreader-sync-server
 
 go 1.26.5
 
