@@ -7,13 +7,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -30,6 +33,8 @@ func main() {
 		registerRoutes(e)
 		return e.Next()
 	})
+
+	registerCommands(app)
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
@@ -54,6 +59,12 @@ func registerRoutes(e *core.ServeEvent) {
 	// Deletion is a separate, deliberate operation — never folded into
 	// switching servers and never into closing an account.
 	e.Router.POST("/wipe", handleWipe)
+
+	// Provisioning. Not part of the five-operation sync contract — these are
+	// about who may sync at all, not about moving data.
+	e.Router.POST("/enroll", handleEnroll)
+	e.Router.GET("/devices", handleListDevices)
+	e.Router.POST("/revoke", handleRevoke)
 
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
@@ -273,4 +284,149 @@ func parseInt(raw string) int64 {
 		n = n*10 + int64(c-'0')
 	}
 	return n
+}
+
+// registerCommands adds the provisioning CLI.
+//
+// The first device has to be created from a shell, because until one exists
+// there is nobody to authorise the request. Everything after that is enrolled
+// by a device that is already paired.
+func registerCommands(app *pocketbase.PocketBase) {
+	var asJSON bool
+
+	pair := &cobra.Command{
+		Use:   "pair [account-label] [device-label]",
+		Short: "Create an account and issue a token for its first device",
+		Run: func(cmd *cobra.Command, args []string) {
+			accountLabel := "My library"
+			deviceLabel := "First device"
+			if len(args) > 0 {
+				accountLabel = args[0]
+			}
+			if len(args) > 1 {
+				deviceLabel = args[1]
+			}
+
+			if err := ensureSchema(app); err != nil {
+				log.Fatal(err)
+			}
+
+			device, err := createAccount(app, accountLabel, deviceLabel)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if asJSON {
+				encoded, _ := json.Marshal(device)
+				// Straight to stdout, not through cobra: PocketBase points the
+				// command's writer at stderr, so `$(... --json)` in a script
+				// would capture nothing at all. --json exists for scripts, so
+				// it has to land where a script looks.
+				fmt.Println(string(encoded))
+				return
+			}
+
+			// Labelled lines rather than a JSON blob, because bootstrapping
+			// prints a wall of migration DDL first and a person has to find
+			// their token in it. `--json` is there for scripts.
+			cmd.Println()
+			cmd.Println("──────────────────────────────────────────────")
+			cmd.Println("Account: " + device.AccountID)
+			cmd.Println("Device:  " + device.DeviceID + "  (" + device.Label + ")")
+			cmd.Println("Token:   " + device.Token)
+			cmd.Println("──────────────────────────────────────────────")
+			cmd.Println()
+			cmd.Println("Paste the token into AllReader on this device.")
+			cmd.Println("It is shown once and is not recoverable — the server")
+			cmd.Println("keeps it only to compare against.")
+			cmd.Println()
+			cmd.Println("Other devices do not need this command: pair them")
+			cmd.Println("from one that is already set up.")
+		},
+	}
+
+	// RootCmd is a field, not a method — an interface assertion for it
+	// compiles and then silently never fires, which is exactly what happened
+	// the first time and why this is wired concretely.
+	pair.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON")
+
+	app.RootCmd.AddCommand(pair)
+}
+
+type enrollRequest struct {
+	Label string `json:"label"`
+}
+
+func handleEnroll(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body enrollRequest
+	_ = e.BindBody(&body)
+	if body.Label == "" {
+		body.Label = "A new device"
+	}
+
+	device, err := enrollDevice(e.App, accountID, body.Label)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not enrol",
+		})
+	}
+	return e.JSON(http.StatusOK, device)
+}
+
+func handleListDevices(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+	devices, err := listDevices(e.App, accountID)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "unavailable",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]any{"devices": devices})
+}
+
+type revokeRequest struct {
+	DeviceID string `json:"device_id"`
+}
+
+func handleRevoke(e *core.RequestEvent) error {
+	accountID, callerID, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body revokeRequest
+	if err := e.BindBody(&body); err != nil || body.DeviceID == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "device_id required",
+		})
+	}
+
+	// Revoking the device you are holding would lock you out of the account
+	// with no way back except the CLI. Refuse, and say why.
+	if body.DeviceID == callerID {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "that is this device — remove the account here instead",
+		})
+	}
+
+	if err := revokeDevice(e.App, accountID, body.DeviceID); err != nil {
+		return e.JSON(http.StatusNotFound, map[string]string{
+			"error": "no such device on this account",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]string{"revoked": body.DeviceID})
 }

@@ -12,8 +12,31 @@ reader, because it holds no keys.
 
 ```sh
 go build -o allreader-sync .
+
+# Create an account and issue a token for your first device. This has to happen
+# from a shell, because until one device has a token there is nobody to
+# authorise the request.
+./allreader-sync pair "My library" "Desktop" --dir=./pb_data
+
 ./allreader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
 ```
+
+`pair` prints the token once. Paste it into AllReader on that device. Add
+`--json` for scripting.
+
+**Every device after the first is enrolled from one that is already paired** —
+no shell access needed:
+
+```sh
+curl -X POST http://127.0.0.1:8099/enroll \
+  -H "Authorization: Bearer <existing-token>" \
+  -d '{"label":"Phone"}'
+```
+
+The QR a user scans during pairing carries the *master key*, which is what makes
+the library readable. The new device still needs its own *server* token, and
+that is what enrol issues. Separate tokens are what make revoking one device
+possible at all.
 
 ## The five operations, frozen
 
@@ -69,6 +92,19 @@ be capable of catching the bug rather than merely passing.
 
 Billing identity maps to `account_id` in a separate table, outside the sync
 path.
+
+## Devices
+
+```
+POST /enroll     issue a token for another device on this account
+GET  /devices    list them — never with their tokens
+POST /revoke     stop one syncing
+```
+
+Listing deliberately omits tokens: a settings screen has no use for them, and a
+token that appears in a list is a token that ends up in a screenshot. Revoking
+the device you are currently holding is refused, because it would lock you out
+of the account with no way back except the CLI.
 
 ## Revocation
 
