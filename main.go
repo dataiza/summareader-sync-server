@@ -1,0 +1,234 @@
+// Command allreader-sync-server is the one sync implementation.
+//
+// Self-hosted for free and hosted as the paid tier are the same binary with a
+// different URL — there is no "cloud edition". That is only sustainable
+// because the server is deliberately incapable: it stores opaque ciphertext
+// against sequence numbers and never learns what any of it means.
+package main
+
+import (
+	"errors"
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/core"
+)
+
+func main() {
+	app := pocketbase.New()
+
+	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
+		if err := e.Next(); err != nil {
+			return err
+		}
+		return ensureSchema(e.App)
+	})
+
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		registerRoutes(e)
+		return e.Next()
+	})
+
+	if err := app.Start(); err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+}
+
+// The five operations, frozen.
+//
+// append, readFrom, putBlob, getBlob, subscribe. Nothing else is offered, and
+// that is the point: "query by tag" or "count unread" would double the work
+// permanently and mean building a database twice, once per backend. Anything
+// the client needs beyond these five, it computes locally from what it has
+// already decrypted.
+func registerRoutes(e *core.ServeEvent) {
+	e.Router.POST("/append", handleAppend)
+	e.Router.GET("/from/{seq}", handleReadFrom)
+	e.Router.PUT("/blob/{name}", handlePutBlob)
+	e.Router.GET("/blob/{name}", handleGetBlob)
+	e.Router.GET("/subscribe", handleSubscribe)
+
+	// Not part of the contract — it exists so a client can tell "wrong URL"
+	// from "right URL, no data", which §9.3 turns into four different prompts.
+	e.Router.GET("/instance", handleInstance)
+}
+
+func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {
+	token := e.Request.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(token) > len(prefix) && token[:len(prefix)] == prefix {
+		token = token[len(prefix):]
+	}
+
+	accountID, deviceID, err := accountForToken(e.App, token)
+	if err != nil {
+		return "", "", false
+	}
+	return accountID, deviceID, true
+}
+
+type appendRequest struct {
+	Payload string `json:"payload"`
+}
+
+type appendResponse struct {
+	Seq int64 `json:"seq"`
+}
+
+func handleAppend(e *core.RequestEvent) error {
+	accountID, deviceID, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body appendRequest
+	if err := e.BindBody(&body); err != nil || body.Payload == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "payload required",
+		})
+	}
+
+	seq, err := appendEntry(e.App, accountID, deviceID, body.Payload)
+	if err != nil {
+		if errors.Is(err, ErrNoAccount) {
+			return e.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "unknown account",
+			})
+		}
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "append failed",
+		})
+	}
+
+	return e.JSON(http.StatusOK, appendResponse{Seq: seq})
+}
+
+type readResponse struct {
+	Entries []LogEntry `json:"entries"`
+}
+
+func handleReadFrom(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	after := parseInt(e.Request.PathValue("seq"))
+	entries, err := readFrom(e.App, accountID, after, 500)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "read failed",
+		})
+	}
+
+	// An empty list is a completely ordinary answer and must never read as an
+	// error — a client that treats "nothing new" as a failure would either
+	// spin or, far worse, conclude the account was wiped.
+	return e.JSON(http.StatusOK, readResponse{Entries: entries})
+}
+
+type blobRequest struct {
+	Payload string `json:"payload"`
+}
+
+func handlePutBlob(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	name := e.Request.PathValue("name")
+	if name == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "name required",
+		})
+	}
+
+	var body blobRequest
+	if err := e.BindBody(&body); err != nil || body.Payload == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "payload required",
+		})
+	}
+
+	if err := putBlob(e.App, accountID, name, body.Payload); err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "store failed",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]string{"name": name})
+}
+
+func handleGetBlob(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	payload, err := getBlob(e.App, accountID, e.Request.PathValue("name"))
+	if err != nil {
+		return e.JSON(http.StatusNotFound, map[string]string{
+			"error": "no such blob",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]string{"payload": payload})
+}
+
+// handleSubscribe is a change *hint*, nothing more.
+//
+// It says "there is something new, come and get it" and carries no payload and
+// no count. A count would tell whoever carries the message how much this user
+// reads and when, which is exactly what the encryption is for.
+func handleSubscribe(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	account, err := e.App.FindRecordById(collAccounts, accountID)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "unavailable",
+		})
+	}
+
+	// Long-polling rather than a websocket for now: the client already polls
+	// on resume, and a socket is a reconnection state machine to maintain for
+	// a message that says "poll now".
+	return e.JSON(http.StatusOK, map[string]any{"head": account.GetInt("seq")})
+}
+
+// handleInstance identifies this server so a client can distinguish an empty
+// account from a different server. Without it, pointing at a fresh instance
+// looks identical to "everything was deleted".
+func handleInstance(e *core.RequestEvent) error {
+	settings := e.App.Settings()
+	return e.JSON(http.StatusOK, map[string]string{
+		"instance": settings.Meta.AppName,
+		"software": "allreader-sync-server",
+	})
+}
+
+func parseInt(raw string) int64 {
+	var n int64
+	for _, c := range raw {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n
+}
