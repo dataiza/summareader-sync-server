@@ -71,6 +71,28 @@ enrol without a shell, that listed devices do not carry their tokens, and that
 the log and the blobs survive a restart. The unit tests cover the handlers;
 this covers everything around them that can be broken while every test passes.
 
+## Finding it on a local network
+
+The server advertises itself over mDNS as `_allreader-sync._tcp`, so a client
+on the same network can offer it rather than asking somebody to read an IP
+address off a router. `serve --no-announce` turns it off, for networks that
+would rather nothing multicast and for hosted instances that have no reason to
+shout on whatever network they sit in.
+
+**Two things it does not survive, both worth knowing before relying on it.**
+
+Docker's default bridge network does not carry multicast to the LAN, so a
+container started by the compose file here is not discoverable. That needs
+`network_mode: host`, which also gives up the port mapping — a deliberate
+trade, not an oversight.
+
+And on a host already running a responder of its own, discovery is uneven:
+verified working between processes with avahi-daemon running, and `avahi-browse`
+on that same host still does not list it. A client on another machine is the
+case that matters and is the case least affected, but this is a convenience
+that can fail quietly, which is why the address always works and nothing
+depends on this.
+
 ## Administration
 
 PocketBase's own dashboard is at `/_/`, and it is where backups, restores and

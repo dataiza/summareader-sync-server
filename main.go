@@ -19,6 +19,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Set by --no-announce. Some networks would rather nothing multicast at all,
+// and a hosted instance has no reason to shout on the network it happens to
+// sit in.
+var noAnnounce bool
+
+// Held for the life of the process. See the comment in OnServe.
+var stopAnnouncing = func() {}
+
 func main() {
 	app := pocketbase.New()
 
@@ -31,10 +39,33 @@ func main() {
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		registerRoutes(e)
+
+		// Findable on a local network, so self-hosting does not begin with
+		// reading an IP address off a router. Only ever a convenience: the
+		// address still works, and a server that could not announce itself
+		// says so and carries on.
+		//
+		// Kept in a variable that outlives this function rather than deferred
+		// into it. OnServe fires *before* serving starts and returns straight
+		// away, so a deferred shutdown here unregistered the announcement
+		// about a millisecond after making it — which looked exactly like
+		// success in the log and was invisible to every browser on the
+		// network. The process exiting is what withdraws it.
+		if !noAnnounce {
+			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName)
+		}
+
 		return e.Next()
 	})
 
 	registerCommands(app)
+
+	// PocketBase owns `serve`; this adds one flag to it rather than wrapping
+	// the command, so `serve --help` still lists everything it always did.
+	if serve, _, err := app.RootCmd.Find([]string{"serve"}); err == nil {
+		serve.Flags().BoolVar(&noAnnounce, "no-announce", false,
+			"do not advertise this server on the local network")
+	}
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
