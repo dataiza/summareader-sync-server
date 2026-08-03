@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -182,5 +183,75 @@ func TestAccountsAreIsolatedAfterProvisioning(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatal("a new account could see another account's log")
+	}
+}
+
+func TestListingDevicesNeverCarriesTokens(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	first, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enrollDevice(app, first.AccountID, "Phone"); err != nil {
+		t.Fatal(err)
+	}
+
+	devices, err := listDevices(app, first.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("devices = %d, want 2", len(devices))
+	}
+
+	// A list of everyone's tokens is the one answer this must never give: any
+	// device could then act as any other, and revocation would mean nothing.
+	for _, device := range devices {
+		if device.Token != "" {
+			t.Fatalf("%s came back carrying a token", device.Label)
+		}
+	}
+
+	encoded, err := json.Marshal(devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "token") {
+		t.Fatalf("the JSON has a token field in it: %s", encoded)
+	}
+}
+
+func TestRevokedDevicesSayThatTheyAre(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	first, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone, err := enrollDevice(app, first.AccountID, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := revokeDevice(app, first.AccountID, phone.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Listed rather than hidden: a device that has been stopped is something
+	// the person doing the stopping should still be able to see.
+	devices, err := listDevices(app, first.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("devices = %d, want 2 — a revoked device is still a device", len(devices))
+	}
+	for _, device := range devices {
+		if device.DeviceID == phone.DeviceID && !device.Revoked {
+			t.Fatal("the revoked device does not say so")
+		}
+		if device.DeviceID == first.DeviceID && device.Revoked {
+			t.Fatal("the wrong device is marked revoked")
+		}
 	}
 }

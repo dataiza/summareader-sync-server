@@ -431,7 +431,7 @@ func handleEnroll(e *core.RequestEvent) error {
 }
 
 func handleListDevices(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
+	accountID, callerID, ok := authenticate(e)
 	if !ok {
 		return e.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "unknown or revoked device",
@@ -443,7 +443,13 @@ func handleListDevices(e *core.RequestEvent) error {
 			"error": "unavailable",
 		})
 	}
-	return e.JSON(http.StatusOK, map[string]any{"devices": devices})
+	// Which of them is asking. The caller cannot work this out from its own
+	// token — it never learns the id that token belongs to — and a list where
+	// "this device" is a guess is a list somebody revokes themselves from.
+	return e.JSON(http.StatusOK, map[string]any{
+		"devices": devices,
+		"self":    callerID,
+	})
 }
 
 type revokeRequest struct {

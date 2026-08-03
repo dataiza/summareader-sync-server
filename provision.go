@@ -26,8 +26,12 @@ func newToken() (string, error) {
 type Device struct {
 	AccountID string `json:"account_id"`
 	DeviceID  string `json:"device_id"`
-	Token     string `json:"token"`
-	Label     string `json:"label"`
+	// Omitted when empty, which is every listing: a token is issued once, to
+	// the device it belongs to, and a list of everyone's tokens is the one
+	// answer this endpoint must never give.
+	Token   string `json:"token,omitempty"`
+	Label   string `json:"label"`
+	Revoked bool   `json:"revoked,omitempty"`
 }
 
 // createAccount makes an account and its first device.
@@ -133,6 +137,7 @@ func listDevices(app core.App, accountID string) ([]Device, error) {
 			AccountID: accountID,
 			DeviceID:  record.Id,
 			Label:     record.GetString("label"),
+			Revoked:   record.GetBool("revoked"),
 		})
 	}
 	return devices, nil
