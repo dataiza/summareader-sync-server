@@ -60,12 +60,14 @@ func main() {
 
 	registerCommands(app)
 
-	// PocketBase owns `serve`; this adds one flag to it rather than wrapping
-	// the command, so `serve --help` still lists everything it always did.
-	if serve, _, err := app.RootCmd.Find([]string{"serve"}); err == nil {
-		serve.Flags().BoolVar(&noAnnounce, "no-announce", false,
-			"do not advertise this server on the local network")
-	}
+	// A persistent flag on the root, not a flag on `serve`.
+	//
+	// The obvious version — Find("serve") and add a flag to it — compiles,
+	// runs, reports no error and does nothing: PocketBase registers `serve`
+	// inside Start(), so the lookup fails here and the `if` quietly skips.
+	// The flag was documented and unusable, which is worse than absent.
+	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce", false,
+		"do not advertise this server on the local network")
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
@@ -116,6 +118,17 @@ func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {
 	return accountID, deviceID, true
 }
 
+// What a device is told when the account is at its ceiling.
+//
+// 507 rather than 403 or 429: the request was allowed and well-formed, and
+// there is nowhere to put it. The wording is what a person can act on — a
+// device that reports "the server refused the request" has told them nothing
+// they can do anything about.
+var quotaError = map[string]string{
+	"error": "this account is full — remove some of the synced copy, or ask " +
+		"whoever runs this server for more room",
+}
+
 type appendRequest struct {
 	Payload string `json:"payload"`
 }
@@ -145,6 +158,9 @@ func handleAppend(e *core.RequestEvent) error {
 			return e.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "unknown account",
 			})
+		}
+		if errors.Is(err, ErrQuotaExceeded) {
+			return e.JSON(http.StatusInsufficientStorage, quotaError)
 		}
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "append failed",
@@ -207,6 +223,9 @@ func handlePutBlob(e *core.RequestEvent) error {
 	}
 
 	if err := putBlob(e.App, accountID, name, body.Payload); err != nil {
+		if errors.Is(err, ErrQuotaExceeded) {
+			return e.JSON(http.StatusInsufficientStorage, quotaError)
+		}
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "store failed",
 		})

@@ -35,8 +35,23 @@ func ensureSchema(app core.App) error {
 	return ensureDevices(app)
 }
 
+// The storage ceiling, in bytes. Zero — the default for every account this
+// server creates — means no ceiling at all. See quota.go for why that is the
+// default and why it stays one.
+func quotaField() *core.NumberField {
+	return &core.NumberField{Name: "quota_bytes", Required: false}
+}
+
 func ensureAccounts(app core.App) error {
-	if _, err := app.FindCollectionByNameOrId(collAccounts); err == nil {
+	if existing, err := app.FindCollectionByNameOrId(collAccounts); err == nil {
+		// A server that predates quotas has every other field already. Adding
+		// the missing one here is what upgrades an existing deployment: the
+		// alternative is a migration to run by hand, on servers whose owners
+		// did not ask for a ceiling and will not be expecting a chore.
+		if existing.Fields.GetByName("quota_bytes") == nil {
+			existing.Fields.Add(quotaField())
+			return app.Save(existing)
+		}
 		return nil
 	}
 
@@ -54,6 +69,8 @@ func ensureAccounts(app core.App) error {
 	c.Fields.Add(&core.TextField{Name: "deleted_at", Max: 40})
 	c.Fields.Add(&core.TextField{Name: "deleted_by", Max: 200})
 	c.Fields.Add(&core.BoolField{Name: "deleted_replacement"})
+
+	c.Fields.Add(quotaField())
 
 	// No collection rules: every route is a Go handler that checks the device
 	// token itself. Rules are evaluated per record and cannot express "this

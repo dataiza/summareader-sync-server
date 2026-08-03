@@ -124,6 +124,35 @@ A backup taken here is safe to keep anywhere, and **useless without the
 recovery code** — it is ciphertext. That is a feature, and it is also the
 thing to remember before relying on the backup as your only copy.
 
+## Ceilings, if you are hosting for somebody else
+
+Both of these are **off**, and stay off unless you set a number. If you self-host,
+the disk is yours and you can already see it — there is nothing here for you.
+They exist for the case where somebody else's growth is your bill.
+
+**Storage.** Each account has a `quota_bytes` field, editable in the dashboard.
+Zero means no ceiling. Set it and the account is refused an append or a new
+blob once its stored payload would exceed it — answered as `507` with a
+sentence the app shows the person, not a status code they can do nothing with.
+
+Usage is summed at the check rather than kept in a counter column, so it cannot
+drift out of step with wipes and deletions. Payload bytes only: row overhead
+and indexes are real disk too, but a ceiling somebody can reason about is worth
+more than one that is exactly right.
+
+**Request rate.** PocketBase ships its own rate limiter, disabled by default,
+under Settings → Rate limits in the dashboard. Rules match by path prefix, so
+`/append` and `/blob` can be limited without any code here. It is per-client,
+not per-account, which is the right shape for abuse and the wrong shape for
+billing — if you ever need a ceiling per paying account, that is a different
+mechanism and this is not it.
+
+**Neither of these prunes anything.** The log is append-only: read state and
+highlights append to it forever, so an account grows with use, not with the
+size of the library. A quota over a log nothing prunes is a ceiling an active
+account eventually reaches whatever it stores, and today the only remedy the
+server can offer is a wipe.
+
 ## The five operations, frozen
 
 ```

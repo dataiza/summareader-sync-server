@@ -38,6 +38,13 @@ func appendEntry(app core.App, accountID, deviceID, payload string) (int64, erro
 			return fmt.Errorf("account: %w", err)
 		}
 
+		// Inside the transaction, so two devices filling the last of an
+		// account's room cannot both be told there was space. Costs nothing
+		// when no ceiling is set, which is every self-hosted account.
+		if err := checkQuota(tx, accountID, len(payload)); err != nil {
+			return err
+		}
+
 		// Read-modify-write inside the transaction. SQLite's single writer
 		// makes this a genuine serialization point rather than a race.
 		seq = int64(account.GetInt("seq")) + 1
@@ -118,6 +125,14 @@ func putBlob(app core.App, accountID, name, payload string) error {
 	)
 	if existing != nil {
 		return nil
+	}
+
+	// After the dedup check: re-uploading what is already stored adds no
+	// bytes, so a full account must still be allowed to do it. Refusing there
+	// would break recovery-blob refresh for the account least able to spare
+	// the room.
+	if err := checkQuota(app, accountID, len(payload)); err != nil {
+		return err
 	}
 
 	collection, err := app.FindCollectionByNameOrId(collBlobs)
