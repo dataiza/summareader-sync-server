@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
@@ -115,6 +116,12 @@ func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {
 	if err != nil {
 		return "", "", false
 	}
+
+	// Every authenticated request, and only after the token resolved: a
+	// rejected one must leave no trace, or the column becomes a log of who has
+	// been guessing tokens. Coarse and best-effort — see seen.go.
+	touchDevice(e.App, deviceID, time.Now())
+
 	return accountID, deviceID, true
 }
 

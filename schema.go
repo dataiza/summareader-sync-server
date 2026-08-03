@@ -112,8 +112,21 @@ func ensureBlobs(app core.App) error {
 	return app.Save(c)
 }
 
+// When this device last presented its token, to the minute. See seen.go for
+// why it is only to the minute, and why an empty value is normal rather than
+// an error.
+func lastSeenField() *core.TextField {
+	return &core.TextField{Name: "last_seen", Max: 40}
+}
+
 func ensureDevices(app core.App) error {
-	if _, err := app.FindCollectionByNameOrId(collDevices); err == nil {
+	if existing, err := app.FindCollectionByNameOrId(collDevices); err == nil {
+		// Added to a collection that already exists, for the same reason
+		// quota_bytes is: an upgrade must not need its owner to run anything.
+		if existing.Fields.GetByName("last_seen") == nil {
+			existing.Fields.Add(lastSeenField())
+			return app.Save(existing)
+		}
 		return nil
 	}
 
@@ -125,6 +138,8 @@ func ensureDevices(app core.App) error {
 	// Whatever it already downloaded stays readable, because it still holds
 	// its own copy of the master key. Nothing here can change that.
 	c.Fields.Add(&core.BoolField{Name: "revoked"})
+
+	c.Fields.Add(lastSeenField())
 
 	c.AddIndex("idx_devices_token", true, "token", "")
 	return app.Save(c)

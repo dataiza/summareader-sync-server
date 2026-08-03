@@ -32,6 +32,10 @@ type Device struct {
 	Token   string `json:"token,omitempty"`
 	Label   string `json:"label"`
 	Revoked bool   `json:"revoked,omitempty"`
+	// RFC3339, to the minute, and empty for a device that has not been heard
+	// from since the column existed. Absent rather than zero, so a client can
+	// say "not since we started recording" instead of 1 January year one.
+	LastSeen string `json:"last_seen,omitempty"`
 }
 
 // createAccount makes an account and its first device.
@@ -138,6 +142,7 @@ func listDevices(app core.App, accountID string) ([]Device, error) {
 			DeviceID:  record.Id,
 			Label:     record.GetString("label"),
 			Revoked:   record.GetBool("revoked"),
+			LastSeen:  record.GetString("last_seen"),
 		})
 	}
 	return devices, nil
