@@ -1,0 +1,47 @@
+# A self-hosted AllReader sync server.
+#
+#   docker compose up -d
+#   docker compose exec sync allreader-sync pair "My library" "Desktop" --dir=/data
+#
+# The second command prints a token once. Paste it into AllReader on that
+# device; every device after it is enrolled from one already paired, with no
+# shell involved.
+
+services:
+  sync:
+    build: .
+    image: allreader-sync:local
+    restart: unless-stopped
+
+    ports:
+      # Bound to localhost on purpose. This server speaks plain HTTP and holds
+      # everyone's ciphertext; putting it straight on a public interface means
+      # tokens crossing the network in the clear. Put a TLS terminator in
+      # front of it, then change this to 8099:8099 if that terminator is on
+      # another host.
+      - "127.0.0.1:8099:8099"
+
+    volumes:
+      # Everything worth keeping. Losing this is losing the sync history —
+      # not the libraries themselves, which live on the devices, but every
+      # device's token and the account they share.
+      - sync-data:/data
+
+    healthcheck:
+      # /instance needs no token, which is what makes it usable here: it is
+      # the endpoint a client calls to tell "wrong URL" from "right URL, no
+      # data", and it answers exactly when the server is able to answer.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8099/instance"]
+      interval: 30s
+      timeout: 5s
+      # Generous, because the first start creates the database and runs the
+      # schema migration before anything answers.
+      start_period: 30s
+      retries: 3
+
+    # The server holds ciphertext and needs no privileges to do it.
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  sync-data:

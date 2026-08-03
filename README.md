@@ -38,6 +38,70 @@ the library readable. The new device still needs its own *server* token, and
 that is what enrol issues. Separate tokens are what make revoking one device
 possible at all.
 
+## Running it in Docker
+
+```sh
+docker compose up -d
+docker compose exec sync allreader-sync pair "My library" "Desktop" --dir=/data
+```
+
+The second command prints a token once, as it does outside Docker, and every
+device after the first enrols from one already paired.
+
+Compose binds the port to `127.0.0.1` on purpose. This server speaks plain
+HTTP and holds everyone's ciphertext, so putting it directly on a public
+interface means device tokens crossing the network in the clear. Put a TLS
+terminator in front of it and expose that instead.
+
+Everything worth keeping is in the `sync-data` volume. Losing it does not lose
+anybody's library — those live on the devices — but it does lose every
+device's token and the account they share, so each device would have to be
+paired again.
+
+### Checking a deployment
+
+```sh
+./scripts/smoke.sh          # build, start, exercise the contract
+./scripts/smoke.sh --clean  # and remove the container and its volume
+```
+
+Twelve checks: that the image builds and starts, that all five operations
+answer, that an unauthenticated request is refused, that a second device can
+enrol without a shell, that listed devices do not carry their tokens, and that
+the log and the blobs survive a restart. The unit tests cover the handlers;
+this covers everything around them that can be broken while every test passes.
+
+## Administration
+
+PocketBase's own dashboard is at `/_/`, and it is where backups, restores and
+raw inspection live. Create a superuser to reach it:
+
+```sh
+docker compose exec sync allreader-sync superuser create you@example.com
+```
+
+**What an admin interface here can and cannot do is decided by the encryption,
+not by effort.** The server holds opaque ciphertext and no keys. So it can:
+
+- list, enrol and revoke devices, and see when each last synced
+- back up and restore the whole store
+- delete an account's data outright, which is what `/wipe` is
+- report how much space an account is using
+
+And it cannot, ever:
+
+- delete a feed, or show you one — it does not know what a feed is
+- apply retention by content, age of an article, or read state
+- search anything
+
+Those belong in the app, which has the keys. An admin screen offering them
+would either be lying or would mean giving the server the keys, which is the
+one thing this design exists to avoid.
+
+A backup taken here is safe to keep anywhere, and **useless without the
+recovery code** — it is ciphertext. That is a feature, and it is also the
+thing to remember before relying on the backup as your only copy.
+
 ## The five operations, frozen
 
 ```
