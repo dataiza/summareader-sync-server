@@ -1,4 +1,4 @@
-// Command allreader-sync-server is the one sync implementation.
+// Command summareader-sync-server is the one sync implementation.
 //
 // Self-hosted for free and hosted as the paid tier are the same binary with a
 // different URL — there is no "cloud edition". That is only sustainable
@@ -328,7 +328,7 @@ func handleInstance(e *core.RequestEvent) error {
 	settings := e.App.Settings()
 	return e.JSON(http.StatusOK, map[string]string{
 		"instance": settings.Meta.AppName,
-		"software": "allreader-sync-server",
+		"software": "summareader-sync-server",
 	})
 }
 
@@ -393,7 +393,7 @@ func registerCommands(app *pocketbase.PocketBase) {
 			cmd.Println("Token:   " + device.Token)
 			cmd.Println("──────────────────────────────────────────────")
 			cmd.Println()
-			cmd.Println("Paste the token into AllReader on this device.")
+			cmd.Println("Paste the token into SummaReader on this device.")
 			cmd.Println("It is shown once and is not recoverable — the server")
 			cmd.Println("keeps it only to compare against.")
 			cmd.Println()

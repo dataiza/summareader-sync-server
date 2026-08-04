@@ -15,7 +15,7 @@ COPY . .
 
 # Static, stripped, and reproducible enough to compare two builds of the same
 # commit. -trimpath keeps the build machine's paths out of the binary.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /allreader-sync .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /summareader-sync .
 
 # Run.
 #
@@ -30,7 +30,7 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates curl \
     && adduser -D -u 10001 -h /data allreader
 
-COPY --from=build /allreader-sync /usr/local/bin/allreader-sync
+COPY --from=build /summareader-sync /usr/local/bin/summareader-sync
 
 # The database lives here, and this is the only thing worth backing up. It is
 # a volume in compose; declared here so `docker run` without one still keeps
@@ -44,4 +44,4 @@ EXPOSE 8099
 # 0.0.0.0 rather than 127.0.0.1: inside a container, localhost means the
 # container, and a server bound there is unreachable from anywhere including
 # the host. Exposure is decided by the port mapping, not by this.
-CMD ["allreader-sync", "serve", "--http=0.0.0.0:8099", "--dir=/data"]
+CMD ["summareader-sync", "serve", "--http=0.0.0.0:8099", "--dir=/data"]

@@ -13,7 +13,7 @@ import (
 //
 // Registered under the convention for a private protocol: a name nobody else
 // uses, over TCP. Clients browse for exactly this and nothing else.
-const serviceType = "_allreader-sync._tcp"
+const serviceType = "_summareader-sync._tcp"
 
 // announce publishes this server on the local network over mDNS.
 //
@@ -36,7 +36,7 @@ func announce(addr, instance string) func() {
 	if instance == "" {
 		host, _ := os.Hostname()
 		if host == "" {
-			host = "AllReader sync"
+			host = "SummaReader sync"
 		}
 		instance = host
 	}
@@ -49,7 +49,7 @@ func announce(addr, instance string) func() {
 		// What a client learns before connecting. Deliberately nothing about
 		// the data: this is broadcast to every machine on the network, so it
 		// carries what is needed to reach the server and not one field more.
-		[]string{"software=allreader-sync-server"},
+		[]string{"software=summareader-sync-server"},
 		nil,
 	)
 	if err != nil {

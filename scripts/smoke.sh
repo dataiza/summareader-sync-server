@@ -43,12 +43,12 @@ done
 echo
 echo "The server:"
 expect "answers /instance without a token" \
-  "$(curl -fsS "$base/instance")" "allreader-sync-server"
+  "$(curl -fsS "$base/instance")" "summareader-sync-server"
 
 # Pairing is a shell command by necessity: until one device has a token there
 # is nobody who could authorise issuing one.
 paired="$(docker compose exec -T sync \
-  allreader-sync pair "Smoke test" "First device" --dir=/data --json)"
+  summareader-sync pair "Smoke test" "First device" --dir=/data --json)"
 token="$(echo "$paired" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
 [ -n "$token" ] || die "pairing produced no token: $paired"
 ok "pairs a first device from the shell"

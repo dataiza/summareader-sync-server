@@ -1,4 +1,4 @@
-# allreader-sync-server
+# summareader-sync-server
 
 One implementation, two deployments: self-host it for free, or use the hosted
 instance. Same binary, different URL — there is no "cloud edition".
@@ -11,17 +11,17 @@ reader, because it holds no keys.
 ## Running it
 
 ```sh
-go build -o allreader-sync .
+go build -o summareader-sync .
 
 # Create an account and issue a token for your first device. This has to happen
 # from a shell, because until one device has a token there is nobody to
 # authorise the request.
-./allreader-sync pair "My library" "Desktop" --dir=./pb_data
+./summareader-sync pair "My library" "Desktop" --dir=./pb_data
 
-./allreader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
+./summareader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
 ```
 
-`pair` prints the token once. Paste it into AllReader on that device. Add
+`pair` prints the token once. Paste it into SummaReader on that device. Add
 `--json` for scripting.
 
 **Every device after the first is enrolled from one that is already paired** —
@@ -42,7 +42,7 @@ possible at all.
 
 ```sh
 docker compose up -d
-docker compose exec sync allreader-sync pair "My library" "Desktop" --dir=/data
+docker compose exec sync summareader-sync pair "My library" "Desktop" --dir=/data
 ```
 
 The second command prints a token once, as it does outside Docker, and every
@@ -73,7 +73,7 @@ this covers everything around them that can be broken while every test passes.
 
 ## Finding it on a local network
 
-The server advertises itself over mDNS as `_allreader-sync._tcp`, so a client
+The server advertises itself over mDNS as `_summareader-sync._tcp`, so a client
 on the same network can offer it rather than asking somebody to read an IP
 address off a router. `serve --no-announce` turns it off, for networks that
 would rather nothing multicast and for hosted instances that have no reason to
@@ -99,7 +99,7 @@ PocketBase's own dashboard is at `/_/`, and it is where backups, restores and
 raw inspection live. Create a superuser to reach it:
 
 ```sh
-docker compose exec sync allreader-sync superuser create you@example.com
+docker compose exec sync summareader-sync superuser create you@example.com
 ```
 
 **What an admin interface here can and cannot do is decided by the encryption,
