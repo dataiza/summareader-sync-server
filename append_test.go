@@ -14,7 +14,7 @@ import (
 func newTestApp(t *testing.T) (core.App, string) {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("", "allreader_sync")
+	dir, err := os.MkdirTemp("", "summareader_sync")
 	if err != nil {
 		t.Fatal(err)
 	}

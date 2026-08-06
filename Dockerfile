@@ -28,7 +28,7 @@ FROM alpine:3.21
 # curl for the healthcheck below, and CA certificates so the server can reach
 # anything over TLS later without a mystery failure.
 RUN apk add --no-cache ca-certificates curl \
-    && adduser -D -u 10001 -h /data allreader
+    && adduser -D -u 10001 -h /data summareader
 
 COPY --from=build /summareader-sync /usr/local/bin/summareader-sync
 
@@ -37,7 +37,7 @@ COPY --from=build /summareader-sync /usr/local/bin/summareader-sync
 # data across a restart rather than silently losing it.
 VOLUME /data
 WORKDIR /data
-USER allreader
+USER summareader
 
 EXPOSE 8099
 

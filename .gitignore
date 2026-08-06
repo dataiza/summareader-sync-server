@@ -1,3 +1,6 @@
 pb_data/
 server
+summareader-sync-server
+summareader-sync
+# The names the binary had before the rename.
 allreader-sync-server
