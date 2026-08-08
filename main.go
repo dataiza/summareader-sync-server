@@ -103,6 +103,12 @@ func registerRoutes(e *core.ServeEvent) {
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
 	e.Router.GET("/instance", handleInstance)
+
+	// Also not part of the contract, and off unless SUMMAREADER_METRICS_TOKEN
+	// is set. A monitoring system is not a device and does not get a device
+	// token: one credential that can both scrape and read the log is a
+	// monitoring system that has the library.
+	e.Router.GET("/metrics", handleMetrics)
 }
 
 func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {

@@ -233,3 +233,23 @@ whole library. The client copy says exactly this and no more.
 PocketBase is pre-1.0 with no compatibility guarantee, so the version in
 `go.mod` is exact. Upgrade deliberately and re-run the tests; the collection
 API in particular changes between minor versions.
+
+## Metrics
+
+`GET /metrics` answers in the Prometheus text format when
+`SUMMAREADER_METRICS_TOKEN` is set, and 404s when it is not. The scraper sends
+it as a bearer token.
+
+```sh
+SUMMAREADER_METRICS_TOKEN=$(openssl rand -hex 24) ./summareader-sync serve
+```
+
+Accounts, devices, log entries, blobs, bytes held — in total and per account,
+because "the server is full" is never the useful form of that question. Plus
+memory, goroutines and uptime.
+
+**A monitoring system does not get a device token.** One credential that can
+both scrape and read the log is a monitoring system that has the library, so
+this is its own secret. Everything reported is a count, a byte total or an age:
+the server holds ciphertext and cannot read an entry, and a test asserts that
+no payload ever appears in the output.
