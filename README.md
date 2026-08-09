@@ -8,7 +8,45 @@ stores opaque ciphertext against sequence numbers and never learns what any of
 it means. It cannot search, cannot count unread, and cannot render a web
 reader, because it holds no keys.
 
-## Running it
+## Leaving it running
+
+```sh
+./scripts/install.sh              # builds it, installs a systemd user service
+./scripts/install.sh --docker     # or runs it as a container — no Go needed here
+./scripts/install.sh --uninstall  # either one, reversed; the database is kept
+```
+
+A *user* service, under `~/.config/systemd/user`: this holds one person's
+ciphertext on one person's machine, and a unit there needs no root to install,
+inspect or remove. `scripts/summareader-sync.service` is the definition the
+installer fills in — edit that rather than the installed copy. For a shared
+box, copy it to `/etc/systemd/system`, give it a `User=` and drop the `--user`
+flags.
+
+```sh
+systemctl --user status summareader-sync
+journalctl --user -u summareader-sync -f
+sudo loginctl enable-linger "$USER"    # or it stops when you log out
+```
+
+The Docker path installs no unit: `restart: unless-stopped` and an enabled
+`docker.service` already bring the container back after a reboot, and a systemd
+unit beside compose is a second thing to keep in step.
+
+It serves the database that is already here. `pb_data` holds the account and
+every device token, so `docker-compose.override.yml` bind-mounts it rather than
+letting the container start on an empty volume — a server that answers
+perfectly well and knows none of your devices. The override also sets
+`user: "1000:1000"`, because the image runs as uid 10001 and a bind mount it
+cannot write reports `attempt to write a readonly database`, which is a
+permission error wearing a misleading sentence. Change that uid to yours, or
+delete the file to go back to the named volume.
+
+## Running it by hand
+
+```sh
+./scripts/run.sh                  # builds, then serves ./pb_data in the foreground
+```
 
 ```sh
 go build -o summareader-sync .

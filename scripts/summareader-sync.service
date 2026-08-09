@@ -1,0 +1,23 @@
+[Unit]
+# Installed by scripts/install.sh, which fills in the @…@ placeholders. Edit
+# this file rather than the installed copy: installing again overwrites it.
+Description=SummaReader sync server
+Documentation=https://github.com/p4ulie/summareader-sync-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=@BIN@ serve --http=@ADDR@ --dir=@DATA@
+Restart=on-failure
+RestartSec=5
+
+# The database is the only thing it writes. Everything else being read-only
+# costs nothing here and is the difference between a bug and a bug that can
+# reach the rest of the machine.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@DATA@
+
+[Install]
+WantedBy=default.target
