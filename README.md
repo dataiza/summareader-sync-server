@@ -252,7 +252,17 @@ path.
 POST /enroll     issue a token for another device on this account
 GET  /devices    list them — never with their tokens
 POST /revoke     stop one syncing
+POST /rename     the caller says what it is called
 ```
+
+`/rename` exists because a label is otherwise written once, at enrolment, by
+whichever device minted the token. That suits a phone somebody is holding and
+not a headless one — an MCP mirror in a container has a name in its config and,
+without this, no way to say it, so every such device is listed under whatever
+was typed at that moment. In practice, "A new device", for all of them.
+
+It renames **the caller**, always. There is no device id in the body, so a
+stolen token can rename the device it was stolen from and nothing else.
 
 Listing deliberately omits tokens: a settings screen has no use for them, and a
 token that appears in a list is a token that ends up in a screenshot. Revoking

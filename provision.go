@@ -167,6 +167,28 @@ func revokeDevice(app core.App, accountID, deviceID string) error {
 	return app.Save(record)
 }
 
+// renameDevice sets a device's own label.
+//
+// Its own, and nobody else's: the caller is identified by the token it
+// authenticated with, so this cannot be used to relabel a sibling. A label is
+// otherwise written once, at enrolment, by whichever device minted the token —
+// which is fine for a phone somebody is holding and useless for a headless
+// one, whose operator is not there at that moment and whose name lives in its
+// config file.
+func renameDevice(app core.App, accountID, deviceID, label string) error {
+	record, err := app.FindRecordById(collDevices, deviceID)
+	if err != nil {
+		return err
+	}
+	// Scoped to the account as well as to the device, for the same reason
+	// revokeDevice is: an id from one account must not reach another's rows.
+	if record.GetString("account") != accountID {
+		return fmt.Errorf("no such device on this account")
+	}
+	record.Set("label", label)
+	return app.Save(record)
+}
+
 // countDevices is used by the wipe confirmation, which must state the blast
 // radius in real numbers rather than "every device".
 func countDevices(app core.App, accountID string) (int, error) {

@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -99,6 +100,7 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/enroll", handleEnroll)
 	e.Router.GET("/devices", handleListDevices)
 	e.Router.POST("/revoke", handleRevoke)
+	e.Router.POST("/rename", handleRename)
 
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
@@ -463,6 +465,53 @@ func handleListDevices(e *core.RequestEvent) error {
 		"devices": devices,
 		"self":    callerID,
 	})
+}
+
+type renameRequest struct {
+	Label string `json:"label"`
+}
+
+// handleRename lets a device say what it is called.
+//
+// The label is set at enrolment and was never changeable, which is fine for a
+// device a person is holding when the token is minted and wrong for one that
+// is not: a mirror running in a container has a name in its config and no way
+// to say it, so every such device appears in the app's list as whatever the
+// phone that enrolled it happened to type — in practice "A new device", for
+// all of them.
+//
+// It renames the caller, always. There is no device id in the body, so a
+// stolen token can rename the device it was stolen from and nothing else.
+func handleRename(e *core.RequestEvent) error {
+	accountID, callerID, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body renameRequest
+	_ = e.BindBody(&body)
+	label := strings.TrimSpace(body.Label)
+	if label == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "a label is required",
+		})
+	}
+	if len([]rune(label)) > 200 {
+		// The column's own limit. Refused rather than truncated: a device
+		// listed under half its name is worse than one that said no.
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "that label is too long",
+		})
+	}
+
+	if err := renameDevice(e.App, accountID, callerID, label); err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not rename",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]string{"label": label})
 }
 
 type revokeRequest struct {

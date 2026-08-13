@@ -255,3 +255,52 @@ func TestRevokedDevicesSayThatTheyAre(t *testing.T) {
 		}
 	}
 }
+
+func TestADeviceCanRenameItself(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	account, _ := createAccount(app, "My library", "Desktop")
+	device, err := enrollDevice(app, account.AccountID, "A new device")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The label is written once, at enrolment, by whichever device minted the
+	// token. That is fine for a phone somebody is holding and useless for a
+	// headless one, whose name is in a config file nobody was reading at that
+	// moment — so every such device is listed as "A new device".
+	if err := renameDevice(app, account.AccountID, device.DeviceID, "MCP mirror"); err != nil {
+		t.Fatal(err)
+	}
+
+	devices, err := listDevices(app, account.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range devices {
+		if d.DeviceID == device.DeviceID && d.Label != "MCP mirror" {
+			t.Fatalf("label is %q, want %q", d.Label, "MCP mirror")
+		}
+	}
+}
+
+func TestRenamingIsScopedToTheAccount(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	mine, _ := createAccount(app, "Mine", "Desktop")
+	theirs, _ := createAccount(app, "Theirs", "Their desktop")
+
+	// An id from another account must not reach these rows, for the same
+	// reason revoking is scoped: a device id is not a secret.
+	err := renameDevice(app, mine.AccountID, theirs.DeviceID, "Mine now")
+	if err == nil {
+		t.Fatal("renamed a device on another account")
+	}
+
+	devices, _ := listDevices(app, theirs.AccountID)
+	for _, d := range devices {
+		if d.Label == "Mine now" {
+			t.Fatal("the other account's device was renamed anyway")
+		}
+	}
+}
