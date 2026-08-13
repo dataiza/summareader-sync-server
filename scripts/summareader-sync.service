@@ -2,7 +2,7 @@
 # Installed by scripts/install.sh, which fills in the @…@ placeholders. Edit
 # this file rather than the installed copy: installing again overwrites it.
 Description=SummaReader sync server
-Documentation=https://github.com/p4ulie/summareader-sync-server
+Documentation=https://github.com/dataiza/summareader-sync-server
 After=network-online.target
 Wants=network-online.target
 

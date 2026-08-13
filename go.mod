@@ -1,4 +1,4 @@
-module github.com/p4ulie/summareader-sync-server
+module github.com/dataiza/summareader-sync-server
 
 go 1.26.5
 
