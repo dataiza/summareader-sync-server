@@ -20,11 +20,10 @@ if [ "${1:-}" = "--docker" ]; then
   shift
   command -v docker >/dev/null || { echo "Docker is not installed." >&2; exit 1; }
 
-  # A different library from the one `scripts/run.sh` alone uses. Compose keeps
-  # its data in a named volume; the native path keeps it in ./pb_data. Neither
-  # sees the other's, which is the right answer for trying something out and a
-  # surprise if nobody says so.
-  echo "Serving from the sync-data volume, not ./pb_data." >&2
+  # Same ./pb_data as the native path, so switching between the two is not a
+  # change of library. The container writes as this user to make that work.
+  SYNC_UID="$(id -u)" SYNC_GID="$(id -g)"
+  export SYNC_UID SYNC_GID
 
   # No -d: the point of this script is a process you can watch and stop. The
   # container is removed on the way out rather than left stopped.

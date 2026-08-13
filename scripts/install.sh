@@ -46,8 +46,7 @@ if [ "${1:-}" = "--docker" ]; then
   command -v docker >/dev/null || { echo "Docker is not installed." >&2; exit 1; }
   if [ "${2:-}" = "--uninstall" ]; then
     docker compose down
-    echo "stopped. The sync-data volume is kept — every device token is in it."
-    echo "  docker volume rm ${PWD##*/}_sync-data   # to drop it too"
+    echo "stopped. ./pb_data is kept — every device token is in it."
     exit 0
   fi
 

@@ -87,12 +87,15 @@ docker compose exec sync summareader-sync pair "My library" "Desktop" --dir=/dat
 The second command prints a token once, as it does outside Docker, and every
 device after the first enrols from one already paired.
 
-Compose binds the port to `127.0.0.1` on purpose. This server speaks plain
-HTTP and holds everyone's ciphertext, so putting it directly on a public
-interface means device tokens crossing the network in the clear. Put a TLS
-terminator in front of it and expose that instead.
+Compose offers the port on `127.0.0.1` and on one named address — set
+`SYNC_BIND` to the one other devices reach this machine by, or delete that
+line for a machine that syncs only with itself. This server speaks plain HTTP
+and holds everyone's ciphertext, so anywhere less private than a network you
+control wants a TLS terminator in front of it exposed instead.
 
-Everything worth keeping is in the `sync-data` volume. Losing it does not lose
+Everything worth keeping is in `./pb_data`, which is the same directory the
+server uses when run without Docker, so the two are one deployment rather than
+two. Set `SYNC_UID`/`SYNC_GID` if that directory is not owned by you. Losing it does not lose
 anybody's library — those live on the devices — but it does lose every
 device's token and the account they share, so each device would have to be
 paired again.

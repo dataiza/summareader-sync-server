@@ -14,18 +14,42 @@ services:
     restart: unless-stopped
 
     ports:
-      # Bound to localhost on purpose. This server speaks plain HTTP and holds
-      # everyone's ciphertext; putting it straight on a public interface means
-      # tokens crossing the network in the clear. Put a TLS terminator in
-      # front of it, then change this to 8099:8099 if that terminator is on
-      # another host.
+      # One interface, named, rather than localhost or everything.
+      #
+      # Localhost is unreachable from another container and from any other
+      # device, which is what the MCP mirror and a phone both need. `0.0.0.0`
+      # is the usual next step and offers this on every interface the machine
+      # has — here that is a second LAN, a Kubernetes management network and
+      # two Docker bridges, none of which asked for it.
+      #
+      # So: loopback, which is what the app on this machine already points at
+      # and must keep working, plus the one address that is supposed to reach
+      # it from elsewhere. Override the second with SYNC_BIND; drop it
+      # entirely to go back to a machine that syncs only with itself.
+      #
+      # It is still plain HTTP carrying device tokens, and this puts them on a
+      # LAN rather than a loopback. That is a real change and worth meaning:
+      # on a network you control it is the ordinary way to sync a phone, and
+      # anywhere less private it wants a TLS terminator in front and
+      # `127.0.0.1:8099:8099` here again.
       - "127.0.0.1:8099:8099"
+      - "${SYNC_BIND:-10.10.20.1}:8099:8099"
+
+    # The container writes as whoever owns ./pb_data, so the same database
+    # works whether the server is run in Docker or straight from the host.
+    # Override when that is not this user.
+    user: "${SYNC_UID:-1000}:${SYNC_GID:-1000}"
 
     volumes:
       # Everything worth keeping. Losing this is losing the sync history —
       # not the libraries themselves, which live on the devices, but every
       # device's token and the account they share.
-      - sync-data:/data
+      #
+      # A directory rather than a named volume, and deliberately: the native
+      # path serves ./pb_data, so a volume here means two databases, one
+      # empty, and a server that answers correctly while knowing nothing —
+      # every device unenrolled, with no error to say why.
+      - ./pb_data:/data
 
     healthcheck:
       # /instance needs no token, which is what makes it usable here: it is
@@ -43,5 +67,3 @@ services:
     security_opt:
       - no-new-privileges:true
 
-volumes:
-  sync-data:
