@@ -46,6 +46,7 @@ delete the file to go back to the named volume.
 
 ```sh
 ./scripts/run.sh                  # builds, then serves ./pb_data in the foreground
+./scripts/run.sh --docker         # same, in a container — needs no Go toolchain
 ```
 
 ```sh

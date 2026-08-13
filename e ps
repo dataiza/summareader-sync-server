@@ -1,0 +1,19 @@
+○ summareader-sync.service - SummaReader sync server
+     Loaded: loaded (]8;;file://mainframe/home/paulie/.config/systemd/user/summareader-sync.service\/home/paulie/.config/systemd/user/summareader-sync.service]8;;\; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: inactive (dead) since Thu 2026-08-13 17:31:09 CEST; 23s ago
+   Duration: 6min 45.531s
+ Invocation: 75f4ad7b5e134780b94e773ff9270021
+       Docs: ]8;;https://github.com/dataiza/summareader-sync-server\https://github.com/dataiza/summareader-sync-server]8;;\
+    Process: 4059919 ExecStart=/home/paulie/.local/bin/summareader-sync serve --http=127.0.0.1:8099 --dir=/home/paulie/Work/Dataiza/git/summareader-sync-server/pb_data (code=exited, status=0/SUCCESS)
+   Main PID: 4059919 (code=exited, status=0/SUCCESS)
+   Mem peak: 89M
+        CPU: 144ms
+
+Aug 13 17:24:23 mainframe systemd[1181]: Started SummaReader sync server.
+Aug 13 17:24:23 mainframe summareader-sync[4059919]: 2026/08/13 17:24:23 announcing "Acme" on the local network as _summareader-sync._tcp
+Aug 13 17:24:23 mainframe summareader-sync[4059919]: 2026/08/13 17:24:23 Server started at http://127.0.0.1:8099
+Aug 13 17:24:23 mainframe summareader-sync[4059919]: ├─ REST API:  http://127.0.0.1:8099/api/
+Aug 13 17:24:23 mainframe summareader-sync[4059919]: └─ Dashboard: http://127.0.0.1:8099/_/
+Aug 13 17:31:09 mainframe systemd[1181]: Stopping SummaReader sync server...
+Aug 13 17:31:09 mainframe systemd[1181]: Stopped SummaReader sync server.
+Aug 13 17:31:09 mainframe systemd[1181]: summareader-sync.service: Consumed 144ms CPU time over 6min 45.540s wall clock time, 89M memory peak.
