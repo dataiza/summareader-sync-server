@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,7 +31,9 @@ var noAnnounce bool
 var stopAnnouncing = func() {}
 
 func main() {
-	app := pocketbase.New()
+	app := pocketbase.NewWithConfig(pocketbase.Config{
+		DefaultDataDir: defaultDataDir(),
+	})
 
 	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
 		if err := e.Next(); err != nil {
@@ -61,6 +64,7 @@ func main() {
 	})
 
 	registerCommands(app)
+	registerGUI(app)
 
 	// A persistent flag on the root, not a flag on `serve`.
 	//
@@ -75,6 +79,34 @@ func main() {
 		log.Fatal(err)
 		os.Exit(1)
 	}
+
+	// The window opens here, after Start has returned, rather than inside the
+	// command that asked for it. PocketBase runs the root command on a
+	// goroutine of its own, with the database already open — so a window drawn
+	// from there would be drawing from a thread macOS does not let anything
+	// draw from, while holding open the database that the server it is about
+	// to start has to have to itself. Coming back here first gives up both:
+	// the first thread is free again, and Start's shutdown closed the
+	// database. In a build without a window this does nothing at all.
+	startGUI()
+}
+
+// Where the database goes when nothing says otherwise.
+//
+// PocketBase's own default is a pb_data beside the executable, which is right
+// for a binary sitting in a checkout and wrong for one double-clicked: inside
+// a macOS .app or under Program Files, the directory next to the executable is
+// read-only, or shared between everyone who logs in. Every launch path shipped
+// here — the scripts, the unit, the container — passes --dir anyway, and an
+// explicit --dir still wins over this, so this only decides what a bare
+// `serve` does. An empty string leaves PocketBase's own default alone rather
+// than inventing a directory out of a failure.
+func defaultDataDir() string {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "summareader-sync")
 }
 
 // The five operations, frozen.
