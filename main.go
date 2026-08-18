@@ -391,10 +391,27 @@ func parseInt(raw string) int64 {
 func registerCommands(app *pocketbase.PocketBase) {
 	var asJSON bool
 
+	// Named for which device it is about, because the old name invited the
+	// question it should have answered. This command and the app's "pairing
+	// code" are different things: this one issues a token, which is
+	// permission to append and to read ciphertext; a code from an app carries
+	// a token *and* the key that makes the library readable, which the server
+	// has never held and must not. So the first device is set up from here,
+	// and every device after it from an app.
 	pair := &cobra.Command{
-		Use:   "pair [account-label] [device-label]",
-		Short: "Create an account and issue a token for its first device",
+		Use:     "first-device [account-label] [device-label]",
+		Aliases: []string{"pair"},
+		Short:   "Create a library and issue a token for its first device",
 		Run: func(cmd *cobra.Command, args []string) {
+			// Said once, on the way past, rather than by refusing: this is a
+			// published command that is in scripts, and breaking those to make
+			// a point about a name would cost more than the name does.
+			if cmd.CalledAs() == "pair" {
+				cmd.PrintErrln("Note: `pair` is now `first-device`. The old " +
+					"name still works.")
+				cmd.PrintErrln()
+			}
+
 			accountLabel := "My library"
 			deviceLabel := "First device"
 			if len(args) > 0 {
@@ -437,8 +454,10 @@ func registerCommands(app *pocketbase.PocketBase) {
 			cmd.Println("It is shown once and is not recoverable — the server")
 			cmd.Println("keeps it only to compare against.")
 			cmd.Println()
-			cmd.Println("Other devices do not need this command: pair them")
-			cmd.Println("from one that is already set up.")
+			cmd.Println("This is only for the first device. Every one after")
+			cmd.Println("it takes a code from an app that is already set up —")
+			cmd.Println("that code carries the key, which this server does not")
+			cmd.Println("have and is not supposed to.")
 		},
 	}
 

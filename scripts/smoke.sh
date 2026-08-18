@@ -48,7 +48,7 @@ expect "answers /instance without a token" \
 # Pairing is a shell command by necessity: until one device has a token there
 # is nobody who could authorise issuing one.
 paired="$(docker compose exec -T sync \
-  summareader-sync pair "Smoke test" "First device" --dir=/data --json)"
+  summareader-sync first-device "Smoke test" "First device" --dir=/data --json)"
 token="$(echo "$paired" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
 [ -n "$token" ] || die "pairing produced no token: $paired"
 ok "pairs a first device from the shell"

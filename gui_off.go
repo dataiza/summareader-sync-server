@@ -27,7 +27,7 @@ func registerGUI(app *pocketbase.PocketBase) {
 			cmd.Println()
 			cmd.Println("The window is a front end for these two, which work here:")
 			cmd.Println("  summareader-sync serve --http=127.0.0.1:8099 --dir=DIR")
-			cmd.Println("  summareader-sync pair \"My library\" \"Desktop\" --dir=DIR")
+			cmd.Println("  summareader-sync first-device \"My library\" \"Desktop\" --dir=DIR")
 		},
 	})
 }

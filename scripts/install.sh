@@ -64,7 +64,7 @@ if [ "${1:-}" = "--docker" ]; then
 
   echo
   echo "  docker compose logs -f"
-  echo "  docker compose exec sync summareader-sync pair \"My library\" \"Desktop\" --dir=/data"
+  echo "  docker compose exec sync summareader-sync first-device \"My library\" \"Desktop\" --dir=/data"
   systemctl is-enabled docker >/dev/null 2>&1 \
     || echo "  sudo systemctl enable --now docker   # or it will not come back after a reboot"
   exit 0

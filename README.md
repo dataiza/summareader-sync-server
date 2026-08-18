@@ -27,12 +27,12 @@ go build -o summareader-sync .
 # Create an account and issue a token for your first device. This has to happen
 # from a shell, because until one device has a token there is nobody to
 # authorise the request.
-./summareader-sync pair "My library" "Desktop" --dir=./pb_data
+./summareader-sync first-device "My library" "Desktop" --dir=./pb_data
 
 ./summareader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
 ```
 
-`pair` prints the token once. Paste it into SummaReader on that device. Add
+`first-device` prints the token once. Paste it into SummaReader on that device. Add
 `--json` for scripting.
 
 **Every device after the first is enrolled from one that is already paired** —
@@ -106,7 +106,7 @@ answers the same way — build into `dist/` and run it from there.
 ![The desktop window: status, counts, and the three buttons](docs/desktop-window.png)
 
 It shows whether the server is up and what it holds, starts and stops it, opens
-PocketBase's dashboard, and pairs a first device — which is the one job that
+PocketBase's dashboard, and issues a first device's token — which is the one job that
 otherwise needs a terminal. Nothing else: the dashboard is the real admin
 interface and this does not reimplement any of it.
 
@@ -142,7 +142,7 @@ picture is regenerated whenever the window changes rather than aging quietly.
 
 ```sh
 docker compose up -d
-docker compose exec sync summareader-sync pair "My library" "Desktop" --dir=/data
+docker compose exec sync summareader-sync first-device "My library" "Desktop" --dir=/data
 ```
 
 The second command prints a token once, as it does outside Docker, and every
