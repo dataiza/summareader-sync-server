@@ -206,6 +206,53 @@ func dirSize(dir string) int64 {
 	return total
 }
 
+// guiPane is the window's body: the widgets that change while the server runs,
+// and the layout holding them.
+//
+// Built from plain text and a flag rather than from a running server, so the
+// same layout can be rendered without a screen — gui_screenshot_test.go does
+// that to produce the picture in the README. A window whose screenshot can
+// only be taken by hand is a window whose screenshot is quietly out of date.
+type guiPane struct {
+	status, counts          *widget.Label
+	toggle, dashboard, pair *widget.Button
+	content                 fyne.CanvasObject
+}
+
+func newGUIPane(status, counts, dir string, running bool) *guiPane {
+	pane := &guiPane{
+		status:    widget.NewLabel(status),
+		counts:    widget.NewLabel(counts),
+		toggle:    widget.NewButton("Start", nil),
+		dashboard: widget.NewButton("Open dashboard", nil),
+		pair:      widget.NewButton("Pair a device", nil),
+	}
+
+	// The dashboard is PocketBase's, served by the child process, so there is
+	// nothing to open until that process is up.
+	if running {
+		pane.toggle.SetText("Stop")
+	} else {
+		pane.dashboard.Disable()
+	}
+
+	// The one line that can be long enough to matter, and the one nothing
+	// updates afterwards, so it needs no field.
+	where := widget.NewLabel(dir)
+	where.Wrapping = fyne.TextWrapBreak
+
+	pane.content = container.NewVBox(
+		pane.status,
+		pane.counts,
+		widget.NewSeparator(),
+		widget.NewLabel("Data directory"),
+		where,
+		widget.NewSeparator(),
+		container.NewGridWithColumns(3, pane.toggle, pane.dashboard, pane.pair),
+	)
+	return pane
+}
+
 func runGUI(addr, dir string) {
 	token, err := newToken()
 	if err != nil {
@@ -226,12 +273,7 @@ func runGUI(addr, dir string) {
 	ui := fyneapp.New()
 	window := ui.NewWindow("SummaReader sync server")
 
-	status := widget.NewLabel("Stopped")
-	counts := widget.NewLabel("")
-	where := widget.NewLabel(dir)
-	where.Wrapping = fyne.TextWrapBreak
-
-	var toggle, dashboard, pair *widget.Button
+	pane := newGUIPane("Stopped", "", dir, false)
 
 	// Everything below runs from a background goroutine, so every widget it
 	// touches goes through fyne.Do — the toolkit owns the main thread and
@@ -243,20 +285,20 @@ func runGUI(addr, dir string) {
 
 		fyne.Do(func() {
 			if up {
-				status.SetText("Running on http://" + addr)
-				toggle.SetText("Stop")
-				dashboard.Enable()
+				pane.status.SetText("Running on http://" + addr)
+				pane.toggle.SetText("Stop")
+				pane.dashboard.Enable()
 			} else {
-				status.SetText("Stopped")
-				toggle.SetText("Start")
-				dashboard.Disable()
+				pane.status.SetText("Stopped")
+				pane.toggle.SetText("Start")
+				pane.dashboard.Disable()
 			}
-			counts.SetText(fmt.Sprintf("%s · %s · %.1f MB",
+			pane.counts.SetText(fmt.Sprintf("%s · %s · %.1f MB",
 				plural(devices, "device"), plural(entries, "entry"), size))
 		})
 	}
 
-	toggle = widget.NewButton("Start", func() {
+	pane.toggle.OnTapped = func() {
 		go func() {
 			if srv.running() {
 				srv.stop()
@@ -265,19 +307,18 @@ func runGUI(addr, dir string) {
 			}
 			refresh()
 		}()
-	})
+	}
 
 	// PocketBase's admin interface, which is the real one. Nothing here
 	// reimplements any of it — the window exists for the three things it has
 	// no answer for: is it up, start it, and get a token onto a device.
-	dashboard = widget.NewButton("Open dashboard", func() {
+	pane.dashboard.OnTapped = func() {
 		if link, err := url.Parse("http://" + addr + "/_/"); err == nil {
 			_ = ui.OpenURL(link)
 		}
-	})
-	dashboard.Disable()
+	}
 
-	pair = widget.NewButton("Pair a device", func() {
+	pane.pair.OnTapped = func() {
 		go func() {
 			device, err := runPair(srv)
 			fyne.Do(func() {
@@ -289,17 +330,9 @@ func runGUI(addr, dir string) {
 			})
 			refresh()
 		}()
-	})
+	}
 
-	window.SetContent(container.NewVBox(
-		status,
-		counts,
-		widget.NewSeparator(),
-		widget.NewLabel("Data directory"),
-		where,
-		widget.NewSeparator(),
-		container.NewGridWithColumns(3, toggle, dashboard, pair),
-	))
+	window.SetContent(pane.content)
 	window.Resize(fyne.NewSize(460, 300))
 
 	go func() {

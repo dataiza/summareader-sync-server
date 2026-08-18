@@ -8,45 +8,17 @@ stores opaque ciphertext against sequence numbers and never learns what any of
 it means. It cannot search, cannot count unread, and cannot render a web
 reader, because it holds no keys.
 
-## Leaving it running
+## Running it
 
-```sh
-./scripts/install.sh              # builds it, installs a systemd user service
-./scripts/install.sh --docker     # or runs it as a container — no Go needed here
-./scripts/install.sh --uninstall  # either one, reversed; the database is kept
-```
+Three ways into the same server: the headless binary, a desktop window that
+supervises that binary, or a container. All three serve the same `pb_data`, so
+the choice is about how you like to start things, not about which server you
+end up with.
 
-A *user* service, under `~/.config/systemd/user`: this holds one person's
-ciphertext on one person's machine, and a unit there needs no root to install,
-inspect or remove. `scripts/summareader-sync.service` is the definition the
-installer fills in — edit that rather than the installed copy. For a shared
-box, copy it to `/etc/systemd/system`, give it a `User=` and drop the `--user`
-flags.
-
-```sh
-systemctl --user status summareader-sync
-journalctl --user -u summareader-sync -f
-sudo loginctl enable-linger "$USER"    # or it stops when you log out
-```
-
-The Docker path installs no unit: `restart: unless-stopped` and an enabled
-`docker.service` already bring the container back after a reboot, and a systemd
-unit beside compose is a second thing to keep in step.
-
-It serves the database that is already here. `pb_data` holds the account and
-every device token, so `docker-compose.override.yml` bind-mounts it rather than
-letting the container start on an empty volume — a server that answers
-perfectly well and knows none of your devices. The override also sets
-`user: "1000:1000"`, because the image runs as uid 10001 and a bind mount it
-cannot write reports `attempt to write a readonly database`, which is a
-permission error wearing a misleading sentence. Change that uid to yours, or
-delete the file to go back to the named volume.
-
-## Running it by hand
+### Headless — the binary
 
 ```sh
 ./scripts/run.sh                  # builds, then serves ./pb_data in the foreground
-./scripts/run.sh --docker         # same, in a container — needs no Go toolchain
 ```
 
 ```sh
@@ -77,7 +49,81 @@ the library readable. The new device still needs its own *server* token, and
 that is what enrol issues. Separate tokens are what make revoking one device
 possible at all.
 
-## Running it in Docker
+**This build needs no C compiler, and that is what makes it easy to run
+anywhere.** `CGO_ENABLED=0` cross-compiles it from one machine to linux/amd64,
+windows/amd64 and both macOS architectures — around 24–25 MB each with the
+debug information stripped, 33–34 MB as `go build` leaves it. One machine
+builds every download, and whoever runs it installs nothing first.
+
+```sh
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" \
+  -o summareader-sync-darwin-arm64 .
+```
+
+#### Leaving it running
+
+```sh
+./scripts/install.sh              # builds it, installs a systemd user service
+./scripts/install.sh --uninstall  # reversed; the database is kept
+```
+
+A *user* service, under `~/.config/systemd/user`: this holds one person's
+ciphertext on one person's machine, and a unit there needs no root to install,
+inspect or remove. `scripts/summareader-sync.service` is the definition the
+installer fills in — edit that rather than the installed copy. For a shared
+box, copy it to `/etc/systemd/system`, give it a `User=` and drop the `--user`
+flags.
+
+```sh
+systemctl --user status summareader-sync
+journalctl --user -u summareader-sync -f
+sudo loginctl enable-linger "$USER"    # or it stops when you log out
+```
+
+### Desktop — a window
+
+```sh
+go build -tags gui -o summareader-sync .
+./summareader-sync gui --http=127.0.0.1:8099   # --dir too, or it uses
+                                               # ~/.config/summareader-sync
+```
+
+![The desktop window: status, counts, and the three buttons](docs/desktop-window.png)
+
+It shows whether the server is up and what it holds, starts and stops it, opens
+PocketBase's dashboard, and pairs a first device — which is the one job that
+otherwise needs a terminal. Nothing else: the dashboard is the real admin
+interface and this does not reimplement any of it.
+
+**The window supervises the server as a child process rather than embedding
+it.** It runs the same argv the systemd unit runs, so the desktop path and the
+service path cannot drift into two different servers, and the server's own
+`log.Fatal` cannot take the window down with it. The counts come from the
+child's `/metrics`, with a token minted per window, rather than from a second
+connection to the SQLite file the child is writing.
+
+**This build needs cgo**, because the toolkit does, which means a C toolchain
+on each platform you want a window for — the exact thing the headless build
+avoids. It is also 52 MB against the headless build's 33 MB. That is the
+trade the `gui` tag exists to keep optional: `go build .` is untouched and
+still cross-compiles, and a build without the tag answers `gui` with a sentence
+saying which download this is.
+
+Honest about the state: **the desktop build has been run on Linux only.**
+Nothing produces the Windows and macOS builds yet — no workflow, no release.
+The code has no platform-specific parts and the toolkit supports all three, but
+neither of those is the same as having run it.
+
+`docs/desktop-window.png` is drawn by `go test -tags gui`, not photographed:
+the software painter renders the same widget tree without a display, so the
+picture is regenerated whenever the window changes rather than aging quietly.
+
+### Container — Docker
+
+```sh
+./scripts/run.sh --docker         # same, in a container — needs no Go toolchain
+./scripts/install.sh --docker     # or leaves it running, restarted after a reboot
+```
 
 ```sh
 docker compose up -d
@@ -86,6 +132,19 @@ docker compose exec sync summareader-sync pair "My library" "Desktop" --dir=/dat
 
 The second command prints a token once, as it does outside Docker, and every
 device after the first enrols from one already paired.
+
+The Docker path installs no systemd unit: `restart: unless-stopped` and an
+enabled `docker.service` already bring the container back after a reboot, and a
+unit beside compose is a second thing to keep in step.
+
+It serves the database that is already here. `pb_data` holds the account and
+every device token, so `docker-compose.override.yml` bind-mounts it rather than
+letting the container start on an empty volume — a server that answers
+perfectly well and knows none of your devices. The override also sets
+`user: "1000:1000"`, because the image runs as uid 10001 and a bind mount it
+cannot write reports `attempt to write a readonly database`, which is a
+permission error wearing a misleading sentence. Change that uid to yours, or
+delete the file to go back to the named volume.
 
 Compose offers the port on `127.0.0.1` and on one named address — set
 `SYNC_BIND` to the one other devices reach this machine by, or delete that
@@ -100,7 +159,7 @@ anybody's library — those live on the devices — but it does lose every
 device's token and the account they share, so each device would have to be
 paired again.
 
-### Checking a deployment
+#### Checking a deployment
 
 ```sh
 ./scripts/smoke.sh          # build, start, exercise the contract
