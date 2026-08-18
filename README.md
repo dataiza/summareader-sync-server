@@ -60,6 +60,15 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" \
   -o summareader-sync-darwin-arm64 .
 ```
 
+`scripts/build.sh` does all of them at once, into `dist/` — five headless
+binaries and the desktop one for whichever machine runs it:
+
+```sh
+./scripts/build.sh              # every version there is
+./scripts/build.sh --headless   # only the portable ones
+./scripts/build.sh --desktop    # only the window, for this machine
+```
+
 #### Leaving it running
 
 ```sh
@@ -83,10 +92,16 @@ sudo loginctl enable-linger "$USER"    # or it stops when you log out
 ### Desktop — a window
 
 ```sh
-go build -tags gui -o summareader-sync .
-./summareader-sync gui --http=127.0.0.1:8099   # --dir too, or it uses
+./scripts/build.sh --desktop                   # or: go build -tags gui .
+./dist/summareader-sync-gui-linux-amd64 gui --http=127.0.0.1:8099
+                                               # --dir too, or it uses
                                                # ~/.config/summareader-sync
 ```
+
+Note the name: a binary built without the tag is the headless one, and asking
+it for `gui` prints how to build the other rather than opening anything. That
+is the trade working as intended, but it does mean an old binary lying around
+answers the same way — build into `dist/` and run it from there.
 
 ![The desktop window: status, counts, and the three buttons](docs/desktop-window.png)
 

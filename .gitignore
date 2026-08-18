@@ -4,3 +4,6 @@ summareader-sync-server
 summareader-sync
 # The names the binary had before the rename.
 allreader-sync-server
+
+# Where scripts/build.sh puts things.
+dist/
