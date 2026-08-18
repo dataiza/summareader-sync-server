@@ -21,7 +21,9 @@ func registerGUI(app *pocketbase.PocketBase) {
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Println("This build has no desktop window. It is the headless")
 			cmd.Println("one — that is what lets it run anywhere without a C")
-			cmd.Println("toolchain. The desktop build is on the releases page.")
+			cmd.Println("toolchain. To build the one that has a window:")
+			cmd.Println()
+			cmd.Println("  go build -tags gui -o summareader-sync-gui .")
 			cmd.Println()
 			cmd.Println("The window is a front end for these two, which work here:")
 			cmd.Println("  summareader-sync serve --http=127.0.0.1:8099 --dir=DIR")
