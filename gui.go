@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,10 +20,12 @@ import (
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/pocketbase/pocketbase"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 )
 
@@ -326,7 +329,7 @@ func runGUI(addr, dir string) {
 					dialog.ShowError(err, window)
 					return
 				}
-				showToken(device, window)
+				showToken(device, addr, window)
 			})
 			refresh()
 		}()
@@ -384,10 +387,97 @@ func runPair(srv *server) (*Device, error) {
 	return &device, nil
 }
 
-// showToken puts the token somewhere it can be selected and copied. It is
-// shown once and is not recoverable, which is the whole reason this button
-// exists: printing it to a terminal nobody has open helps nobody.
-func showToken(device *Device, window fyne.Window) {
+// pairingPayload is what the QR code carries: the address of this server and
+// a device token, and deliberately nothing else.
+//
+// The app's own pairing code carries the library's master key as well, and
+// scanning one of those means "join this library". The server has never held
+// that key — it stores ciphertext and could not read a library if it wanted
+// to — so a code minted here says only "here is my server, here is a token",
+// which is exactly what typing those two things by hand would say. The shape
+// is a contract with the app; a renamed field is a phone that refuses to scan.
+func pairingPayload(serverURL, token string) (string, error) {
+	payload, err := json.Marshal(struct {
+		V int    `json:"v"`
+		U string `json:"u"`
+		T string `json:"t"`
+	}{1, serverURL, token})
+	return string(payload), err
+}
+
+// reachableURL turns the address this window serves on into one the phone
+// scanning the code can actually open.
+//
+// The window's default is loopback, and a QR saying 127.0.0.1 works on every
+// device except the one it was drawn for. So when the server is bound to
+// loopback or to everything, this looks up the machine's own address on the
+// local network — the same address the mDNS announcement leads clients to,
+// and what SYNC_BIND names for the container. An address someone chose
+// explicitly is left alone: they know where they put it.
+//
+// Empty when there is nothing a phone could reach, which the dialog says out
+// loud. A code that silently cannot work is worse than no code.
+func reachableURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil && host != "" {
+		return "http://" + net.JoinHostPort(host, port)
+	}
+	if ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		return "http://" + net.JoinHostPort(host, port)
+	}
+
+	lan := lanIP()
+	if lan == "" {
+		return ""
+	}
+	return "http://" + net.JoinHostPort(lan, port)
+}
+
+// lanIP is this machine's address on the network the phone is also on.
+//
+// The first private IPv4 on an interface that is up, which on an ordinary
+// desktop is the only one there is. A machine on two networks at once gets
+// whichever the system lists first, and that is a guess — but it is the same
+// guess the user would make, and the dialog shows the address it chose.
+func lanIP() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			network, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ip := network.IP.To4(); ip != nil && ip.IsPrivate() {
+				return ip.String()
+			}
+		}
+	}
+	return ""
+}
+
+// showToken puts the token somewhere it can be selected and copied, and beside
+// it the same token as a QR code. It is shown once and is not recoverable,
+// which is the whole reason this button exists: printing it to a terminal
+// nobody has open helps nobody.
+//
+// Two ways into one library: a desktop copies the text, a phone scans the
+// code rather than typing forty-three characters off another screen.
+func showToken(device *Device, addr string, window fyne.Window) {
 	field := widget.NewEntry()
 	field.SetText(device.Token)
 
@@ -395,10 +485,49 @@ func showToken(device *Device, window fyne.Window) {
 		window.Clipboard().SetContent(device.Token)
 	})
 
-	dialog.ShowCustom("Paste this into SummaReader", "Done", container.NewVBox(
+	side := container.NewVBox(
 		widget.NewLabel("Account "+device.AccountID),
 		field,
 		copyButton,
-		widget.NewLabel("Shown once. Other devices are paired from this one."),
-	), window)
+	)
+
+	code, note := pairingCode(addr, device.Token)
+	body := container.NewVBox(side, widget.NewLabel(note))
+	if code != nil {
+		// The code on the left and the text beside it, so the dialog reads as
+		// one thing with two ways in rather than as two offers.
+		body = container.NewVBox(
+			container.NewBorder(nil, nil, code, nil, side),
+			widget.NewLabel(note),
+		)
+	}
+
+	dialog.ShowCustom("Paste this into SummaReader", "Done", body, window)
+}
+
+// pairingCode draws the QR, or returns nothing and a line saying why.
+func pairingCode(addr, token string) (fyne.CanvasObject, string) {
+	serverURL := reachableURL(addr)
+	if serverURL == "" {
+		return nil, "Shown once. No address on this network to put in a code —\n" +
+			"the server is on loopback, so type the token in by hand."
+	}
+
+	payload, err := pairingPayload(serverURL, token)
+	if err != nil {
+		return nil, "Shown once. Other devices are paired from this one."
+	}
+	png, err := qrcode.New(payload, qrcode.Medium)
+	if err != nil {
+		return nil, "Shown once. Other devices are paired from this one."
+	}
+
+	// Drawn at more pixels than it is shown at and told to fit rather than
+	// stretch, because a QR resampled off its module grid is a QR a camera
+	// hesitates over.
+	image := canvas.NewImageFromImage(png.Image(512))
+	image.FillMode = canvas.ImageFillContain
+	image.SetMinSize(fyne.NewSize(180, 180))
+
+	return image, "Scan on a phone, or copy the token. Shown once, for\n" + serverURL + "."
 }
