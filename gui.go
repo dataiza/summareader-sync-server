@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -440,15 +441,42 @@ func reachableURL(addr string) string {
 
 // lanIP is this machine's address on the network the phone is also on.
 //
-// The first private IPv4 on an interface that is up, which on an ordinary
-// desktop is the only one there is. A machine on two networks at once gets
-// whichever the system lists first, and that is a guess — but it is the same
-// guess the user would make, and the dialog shows the address it chose.
+// The first of the candidates below, which on an ordinary desktop is the only
+// one there is. Every caller that has a person in front of it offers the whole
+// list instead; this is the answer for the places that can only take one.
 func lanIP() string {
+	if addrs := lanAddrs(); len(addrs) > 0 {
+		return addrs[0].ip
+	}
+	return ""
+}
+
+// lanAddr is one address a code could name, and the interface it sits on.
+type lanAddr struct{ ip, iface string }
+
+// The interface name is what makes the choice obvious to somebody who has
+// never thought about networking: 10.10.20.1 and 172.17.0.1 look equally
+// plausible until one of them says docker0 beside it.
+func (a lanAddr) String() string {
+	if a.iface == "" {
+		return a.ip
+	}
+	return a.ip + " (" + a.iface + ")"
+}
+
+// lanAddrs is every private IPv4 this machine answers on, likeliest first.
+//
+// A desktop with Docker or a VM manager installed has several, and only some
+// of them lead anywhere a phone can follow. The virtual ones are sorted to the
+// back rather than dropped, because somebody running this inside a container
+// may well need the one on the bridge — but nobody should be handed it first.
+func lanAddrs() []lanAddr {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return ""
+		return nil
 	}
+
+	var found []lanAddr
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -463,11 +491,61 @@ func lanIP() string {
 				continue
 			}
 			if ip := network.IP.To4(); ip != nil && ip.IsPrivate() {
-				return ip.String()
+				found = append(found, lanAddr{ip.String(), iface.Name})
 			}
 		}
 	}
-	return ""
+
+	orderLANAddrs(found)
+	return found
+}
+
+// orderLANAddrs moves the virtual interfaces to the back, leaving the order
+// the system gave everything else — that order is the machine's own opinion
+// about which network matters, and this has no better one.
+func orderLANAddrs(addrs []lanAddr) {
+	sort.SliceStable(addrs, func(i, j int) bool {
+		return !virtualIface(addrs[i].iface) && virtualIface(addrs[j].iface)
+	})
+}
+
+// virtualIface recognises the interfaces that exist for software on this
+// machine to talk to itself. Named by prefix because that is how the tools
+// that create them name them, and a phone can reach none of them.
+func virtualIface(name string) bool {
+	for _, prefix := range []string{"docker", "br-", "bridge", "veth", "virbr", "vboxnet", "vmnet", "tun", "tap"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// pairingHosts is what the dialog offers, in the order it offers them.
+//
+// An address someone typed on the command line goes first: that is a stated
+// intention, not a guess, and the rest of the list is guesswork by comparison.
+// Everything the machine holds still follows it, because the bind address and
+// the address a phone should dial are not always the same thing.
+func pairingHosts(addr string) []lanAddr {
+	hosts := lanAddrs()
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return hosts
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+		return hosts
+	}
+
+	chosen := []lanAddr{{ip: host}}
+	for _, candidate := range hosts {
+		if candidate.ip != host {
+			chosen = append(chosen, candidate)
+		}
+	}
+	return chosen
 }
 
 // showToken puts the token somewhere it can be selected and copied, and beside
@@ -491,16 +569,51 @@ func showToken(device *Device, addr string, window fyne.Window) {
 		copyButton,
 	)
 
-	code, note := pairingCode(addr, device.Token)
-	body := container.NewVBox(side, widget.NewLabel(note))
-	if code != nil {
-		// The code on the left and the text beside it, so the dialog reads as
-		// one thing with two ways in rather than as two offers.
-		body = container.NewVBox(
-			container.NewBorder(nil, nil, code, nil, side),
-			widget.NewLabel(note),
-		)
+	_, port, _ := net.SplitHostPort(addr)
+	hosts := pairingHosts(addr)
+	if len(hosts) == 0 {
+		_, note := pairingCode(addr, device.Token)
+		dialog.ShowCustom("Paste this into SummaReader", "Done",
+			container.NewVBox(side, widget.NewLabel(note)), window)
+		return
 	}
+
+	// Which address the code names is a question only the person in front of
+	// the screen can answer — the machine cannot tell which network the phone
+	// is on. So the code is redrawn on every change of the choice rather than
+	// drawn once from a guess.
+	note := widget.NewLabel("")
+	image := container.NewStack()
+	draw := func(chosen lanAddr) {
+		code, text := pairingCode(net.JoinHostPort(chosen.ip, port), device.Token)
+		image.Objects = nil
+		if code != nil {
+			image.Objects = []fyne.CanvasObject{code}
+		}
+		image.Refresh()
+		note.SetText(text)
+	}
+
+	options := make([]string, len(hosts))
+	for i, host := range hosts {
+		options[i] = host.String()
+	}
+	choose := widget.NewSelect(options, func(selected string) {
+		for _, host := range hosts {
+			if host.String() == selected {
+				draw(host)
+				return
+			}
+		}
+	})
+	choose.SetSelected(options[0])
+
+	// The code on the left and the text beside it, so the dialog reads as one
+	// thing with two ways in rather than as two offers.
+	body := container.NewVBox(
+		container.NewBorder(nil, nil, container.NewVBox(image, choose), nil, side),
+		note,
+	)
 
 	dialog.ShowCustom("Paste this into SummaReader", "Done", body, window)
 }
