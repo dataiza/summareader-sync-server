@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/software"
@@ -40,6 +41,11 @@ func TestTheReadmeScreenshotIsWhatTheWindowDraws(t *testing.T) {
 		running: true,
 		devices: 3,
 		compose: true,
+		paired: []overviewDevice{
+			{ID: "a", Label: "Workshop desktop", LastSeen: recently(2 * time.Minute), Entries: 912},
+			{ID: "b", Label: "Pixel", LastSeen: recently(3 * time.Hour), Entries: 371},
+			{ID: "c", Label: "Old laptop", Revoked: true, LastSeen: recently(9 * 24 * time.Hour), Entries: 1},
+		},
 	})
 
 	canvas := software.NewCanvas()
@@ -47,7 +53,7 @@ func TestTheReadmeScreenshotIsWhatTheWindowDraws(t *testing.T) {
 	// is read on displays that are not the one it was drawn for.
 	canvas.SetScale(2)
 	canvas.SetContent(pane.content)
-	canvas.Resize(fyne.NewSize(480, 380))
+	canvas.Resize(fyne.NewSize(480, 640))
 
 	if err := os.MkdirAll("docs", 0o755); err != nil {
 		t.Fatal(err)
@@ -61,4 +67,11 @@ func TestTheReadmeScreenshotIsWhatTheWindowDraws(t *testing.T) {
 	if err := png.Encode(file, software.RenderCanvas(canvas, theme.DefaultTheme())); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// recently is a timestamp that far back, so the picture reads the way a real
+// window does. Written out as an absolute time because that is what the
+// server sends and what `ago` parses.
+func recently(since time.Duration) string {
+	return time.Now().Add(-since).Format(time.RFC3339)
 }

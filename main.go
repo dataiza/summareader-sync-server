@@ -148,6 +148,11 @@ func registerRoutes(e *core.ServeEvent) {
 	// token: one credential that can both scrape and read the log is a
 	// monitoring system that has the library.
 	e.Router.GET("/metrics", handleMetrics)
+
+	// The desktop window's one request, on the same credential and under the
+	// same rule: counts, names and timestamps, nothing about what is in an
+	// entry. See overview.go for why it is neither /metrics nor /devices.
+	e.Router.GET("/overview", handleOverview)
 }
 
 func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {

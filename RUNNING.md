@@ -89,6 +89,7 @@ What it shows and what each control does:
 |---|---|
 | **status line** | whether the server is up, on which address, and — when a unit is installed — that systemd is the one running it |
 | **counts** | devices, log entries and what the database weighs |
+| **the device list** | every device paired with this server: what it is called, when it was last heard from, and how many entries it has sent. Revoked devices stay on the list and say so — a device someone stopped is one they should still be able to see — and so does a device that has sent nothing, which is either brand new or not getting through |
 | **Address** | the bind address and port. Loopback and `0.0.0.0` are offered first because they are the two *decisions*; after them, every address this machine actually answers on, labelled with its interface. Changing either restarts the server, and rewrites the unit when there is one |
 | **Data directory** | where the database is. Set with `--dir` at launch; not editable here |
 | **Start at login** | writes `~/.config/systemd/user/summareader-sync.service` and enables it, so the server comes back after a reboot without the window. Unchecking removes it again. Linux only — the row is absent elsewhere |
@@ -102,8 +103,8 @@ What it shows and what each control does:
 it.** It runs the same argv the systemd unit runs, so the desktop path and the
 service path cannot drift into two different servers, and the server's own
 `log.Fatal` cannot take the window down with it. The counts come from that
-process's `/metrics`, with a token minted per window, rather than from a second
-connection to the SQLite file it is writing.
+process's `/metrics` and `/overview`, with a token minted per window, rather
+than from a second connection to the SQLite file it is writing.
 
 **One owner at a time.** With a unit installed, systemd owns the server and the
 window is a remote control for it: Start and Stop drive `systemctl`, and the
@@ -262,6 +263,15 @@ account eventually reaches whatever it stores, and today the only remedy the
 server can offer is a wipe.
 
 ## Metrics
+
+`GET /overview` answers the same token with the window's version of the same
+question: totals, plus every device with its label, last-seen and how much it
+has appended. It exists because `/metrics` is counts-only by design — a
+per-device table there would mean Prometheus labels carrying people's device
+names — and because `/devices` answers a *device* token and is scoped to that
+device's account, which an operator's window does not have. Nothing in it
+describes the contents of an entry, for the same reason nothing in `/metrics`
+does: the server cannot read one.
 
 `GET /metrics` answers in the Prometheus text format when
 `SUMMAREADER_METRICS_TOKEN` is set, and 404s when it is not. The scraper sends

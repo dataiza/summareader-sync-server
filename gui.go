@@ -205,6 +205,58 @@ func (s *server) stats() (up bool, devices, entries float64) {
 		gauge(text, "summareader_server_log_entries")
 }
 
+// overview is who is paired and what they have sent, in one request.
+//
+// The same credential as stats(), because it is the same endpoint family and
+// the window already holds the token. Errors are a nil slice rather than a
+// dialog: this runs every couple of seconds, and a server that is down is
+// already saying so on the line above.
+func (s *server) overview() *overview {
+	req, err := http.NewRequest("GET", "http://"+s.bind()+"/overview", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+s.token)
+
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var out overview
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out) != nil {
+		return nil
+	}
+	return &out
+}
+
+// ago says how long ago something was, in the roughest terms that are still
+// true. Minutes are the finest resolution the server records, so a seconds
+// figure here would be a precision the data does not have.
+func ago(stamp string) string {
+	if stamp == "" {
+		return "never synced"
+	}
+	when, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return stamp
+	}
+	since := time.Since(when)
+	switch {
+	case since < 2*time.Minute:
+		return "just now"
+	case since < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(since.Minutes()))
+	case since < 48*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(since.Hours()))
+	default:
+		return fmt.Sprintf("%d days ago", int(since.Hours()/24))
+	}
+}
+
 // gauge picks one unlabelled sample out of the Prometheus text format. Enough
 // for three numbers on a window — a parser for the whole format would be a
 // dependency for something the server prints ten lines of.
@@ -255,6 +307,7 @@ type paneState struct {
 	status, counts, dir, addr string
 	running                   bool
 	devices                   int
+	paired                    []overviewDevice
 	compose                   bool // a docker-compose.yml was found next to us
 	service                   bool // "Start at login" is on
 	docker                    bool // ...and the unit runs the container
@@ -268,7 +321,12 @@ type paneState struct {
 // that to produce the picture in the README. A window whose screenshot can
 // only be taken by hand is a window whose screenshot is quietly out of date.
 type guiPane struct {
-	status, counts          *widget.Label
+	status, counts *widget.Label
+	devices        *fyne.Container
+	// What the device rows were last drawn from, so a poll every two seconds
+	// does not rebuild widgets that have not changed — and so the list does
+	// not flicker under somebody reading it.
+	drawn                   string
 	toggle, dashboard, pair *widget.Button
 	bind                    *widget.Select
 	port                    *widget.Entry
@@ -291,7 +349,9 @@ func newGUIPane(state paneState) *guiPane {
 		toggle:    widget.NewButton("Start", nil),
 		dashboard: widget.NewButton("Open dashboard", nil),
 		pair:      widget.NewButton(pairButtonText(state.devices), nil),
+		devices:   container.NewVBox(),
 	}
+	pane.setDevices(state.paired)
 
 	// The dashboard is PocketBase's, served by the child process, so there is
 	// nothing to open until that process is up.
@@ -335,6 +395,8 @@ func newGUIPane(state paneState) *guiPane {
 		pane.status,
 		pane.counts,
 		widget.NewSeparator(),
+		pane.devices,
+		widget.NewSeparator(),
 		widget.NewLabel("Address"),
 		container.NewBorder(nil, nil, nil, portBox, pane.bind),
 		widget.NewLabel("Data directory"),
@@ -374,6 +436,55 @@ func newGUIPane(state paneState) *guiPane {
 
 	pane.content = container.NewVBox(body...)
 	return pane
+}
+
+// setDevices redraws the list, and only when it has something new to say.
+//
+// Every device is listed, revoked ones included: a device that has been
+// stopped is something whoever stopped it should still be able to see. So is
+// one that has never sent anything — that device is either new or not getting
+// through, and leaving it out hides both.
+func (p *guiPane) setDevices(devices []overviewDevice) {
+	fingerprint := deviceFingerprint(devices)
+	if fingerprint == p.drawn {
+		return
+	}
+	p.drawn = fingerprint
+
+	p.devices.RemoveAll()
+	if len(devices) == 0 {
+		p.devices.Add(widget.NewLabel("No devices paired yet."))
+		p.devices.Refresh()
+		return
+	}
+	for _, device := range devices {
+		name := device.Label
+		if name == "" {
+			// A device whose token was minted without a label. Its id is not
+			// a name, but it is what distinguishes it from the others.
+			name = device.ID
+		}
+		title := widget.NewLabel(name)
+		title.TextStyle = fyne.TextStyle{Bold: true}
+		if device.Revoked {
+			name += " · revoked"
+			title.SetText(name)
+		}
+		detail := widget.NewLabel(fmt.Sprintf("%s · %s sent",
+			ago(device.LastSeen), plural(float64(device.Entries), "entry")))
+		detail.TextStyle = fyne.TextStyle{Italic: true}
+		p.devices.Add(container.NewVBox(title, detail))
+	}
+	p.devices.Refresh()
+}
+
+func deviceFingerprint(devices []overviewDevice) string {
+	var out strings.Builder
+	for _, device := range devices {
+		fmt.Fprintf(&out, "%s|%s|%t|%s|%d\n",
+			device.ID, device.Label, device.Revoked, device.LastSeen, device.Entries)
+	}
+	return out.String()
 }
 
 // pairButtonText is the whole difference between the two questions this button
@@ -471,6 +582,10 @@ func runGUI(addr, dir string) {
 		size := float64(dirSize(dir)) / (1 << 20)
 		managed := srv.managed()
 		where := srv.bind()
+		// Who is paired and what each has sent. Nil when the server is down,
+		// which leaves the last list on screen rather than blanking it — the
+		// devices did not stop existing because the server stopped.
+		detail := srv.overview()
 
 		fyne.Do(func() {
 			devices = int(deviceCount)
@@ -492,6 +607,9 @@ func runGUI(addr, dir string) {
 			}
 			pane.counts.SetText(fmt.Sprintf("%s · %s · %.1f MB",
 				plural(deviceCount, "device"), plural(entries, "entry"), size))
+			if detail != nil {
+				pane.setDevices(detail.Devices)
+			}
 			pane.pair.SetText(pairButtonText(devices))
 		})
 	}
@@ -629,8 +747,11 @@ func runGUI(addr, dir string) {
 		}()
 	}
 
-	window.SetContent(pane.content)
-	window.Resize(fyne.NewSize(480, 400))
+	// Scrolled, because the device list grows: ten paired devices would
+	// otherwise push Start and Add a device off the bottom of a window whose
+	// size was chosen when the body was fixed.
+	window.SetContent(container.NewVScroll(pane.content))
+	window.Resize(fyne.NewSize(480, 560))
 
 	go func() {
 		for {
