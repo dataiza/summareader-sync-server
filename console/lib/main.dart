@@ -63,7 +63,7 @@ class ConsoleApp extends StatelessWidget {
     Ar.use(brightness);
 
     return MaterialApp(
-      title: 'SummaReader sync server',
+      title: 'SummaReader Sync Server',
       debugShowCheckedModeBanner: false,
       theme: Ar.themeData(brightness),
       home: Scaffold(

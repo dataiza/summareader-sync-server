@@ -131,7 +131,7 @@ class ConsoleView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const title = 'Sync server';
+    const title = 'SummaReader Sync Server';
     return SingleChildScrollView(
       child: Center(
         child: ConstrainedBox(
