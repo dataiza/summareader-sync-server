@@ -118,3 +118,93 @@ func TestTheChosenBindAddressIsOfferedFirst(t *testing.T) {
 		}
 	}
 }
+
+// The unit file is written by the window and read by systemd, and nothing in
+// between ever looks at it. A wrong ExecStart is a service that fails at the
+// next login, silently, in a log nobody has open — so the bytes are asserted
+// here rather than by installing one and hoping.
+func TestTheUnitRunsWhatTheWindowWasAskedFor(t *testing.T) {
+	native := renderUnit(serviceConfig{
+		exe:  "/home/you/.local/bin/summareader-sync",
+		addr: "10.10.20.1:8099", dir: "/home/you/pb_data", token: "sesame",
+	})
+
+	for _, want := range []string{
+		"ExecStart=/home/you/.local/bin/summareader-sync serve --http=10.10.20.1:8099 --dir=/home/you/pb_data",
+		`Environment="SUMMAREADER_METRICS_TOKEN=sesame"`,
+		"ReadWritePaths=/home/you/pb_data",
+		"WantedBy=default.target",
+	} {
+		if !strings.Contains(native, want) {
+			t.Fatalf("the unit is missing %q:\n%s", want, native)
+		}
+	}
+
+	container := renderUnit(serviceConfig{
+		exe:  "/home/you/.local/bin/summareader-sync",
+		addr: "10.10.20.1:9000", dir: "/home/you/pb_data",
+		compose: "/home/you/src/sync/docker-compose.yml", token: "sesame",
+		uid: 1000, gid: 1000,
+	})
+
+	// The bind chosen in the window reaches compose as two variables, because
+	// a container's own port is fixed by the image and only the mapping moves.
+	for _, want := range []string{
+		"ExecStart=docker compose -f /home/you/src/sync/docker-compose.yml up",
+		"ExecStop=docker compose -f /home/you/src/sync/docker-compose.yml down",
+		`Environment="SYNC_BIND=10.10.20.1"`,
+		`Environment="SYNC_PORT=9000"`,
+		`Environment="SYNC_UID=1000"`,
+		"WorkingDirectory=/home/you/src/sync",
+	} {
+		if !strings.Contains(container, want) {
+			t.Fatalf("the container unit is missing %q:\n%s", want, container)
+		}
+	}
+	// ProtectSystem=strict on the Docker path is a unit that cannot reach the
+	// socket it needs. The image confines itself; this would only break it.
+	if strings.Contains(container, "ProtectSystem") {
+		t.Fatalf("the container unit hardened the host side:\n%s", container)
+	}
+
+	// What the window reads back on the next launch, so it reopens on the
+	// server that is actually running rather than on its own defaults.
+	if got := serviceUnitPort(container); got != "9000" {
+		t.Fatalf("port read back as %q", got)
+	}
+}
+
+// The third button asks two different questions and used to ask the wrong one
+// twice. With a library already on the server, offering to create a first
+// device again creates a second, unrelated one — which syncs nothing and looks
+// like it worked.
+func TestTheButtonKnowsWhetherThereIsAlreadyALibrary(t *testing.T) {
+	if got := pairButtonText(0); got != "Create first device" {
+		t.Fatalf("empty server offers %q", got)
+	}
+	if got := pairButtonText(3); got != "Add a device" {
+		t.Fatalf("server with three devices offers %q", got)
+	}
+}
+
+// Loopback and everything are decisions rather than addresses, so they are
+// offered even though no interface answers to them — and an address already in
+// use survives the list not containing it.
+func TestTheAddressMenuOffersBothDecisionsAndKeepsAnUnknownBind(t *testing.T) {
+	offered := bindHosts("127.0.0.1")
+	if offered[0].ip != "127.0.0.1" || offered[1].ip != "0.0.0.0" {
+		t.Fatalf("the two decisions are not first: %v", offered)
+	}
+
+	kept := bindHosts("sync.example")
+	if kept[0].ip != "sync.example" {
+		t.Fatalf("a hostname somebody chose was dropped: %v", kept)
+	}
+
+	if host, port := splitBind("10.10.20.1:8099"); host != "10.10.20.1" || port != "8099" {
+		t.Fatalf("split: %q %q", host, port)
+	}
+	if host, port := splitBind("[::1]:8099"); host != "::1" || port != "8099" {
+		t.Fatalf("split v6: %q %q", host, port)
+	}
+}

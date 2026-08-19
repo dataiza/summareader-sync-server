@@ -29,20 +29,25 @@ func TestTheReadmeScreenshotIsWhatTheWindowDraws(t *testing.T) {
 
 	// A small real install: one library, three devices that have been in use
 	// for a while, and the server up — which is the only state in which the
-	// dashboard button is worth showing, since that is when it is live.
-	pane := newGUIPane(
-		"Running on http://192.168.1.24:8099",
-		"3 devices · 1284 entries · 12.4 MB",
-		"/home/you/.local/share/summareader-sync/pb_data",
-		true,
-	)
+	// dashboard button is worth showing, since that is when it is live. Three
+	// devices is also what makes the third button read "Add a device", which
+	// is the state a reader of the README is most likely to be in.
+	pane := newGUIPane(paneState{
+		status:  "Running on http://192.168.1.24:8099",
+		counts:  "3 devices · 1284 entries · 12.4 MB",
+		dir:     "/home/you/.local/share/summareader-sync/pb_data",
+		addr:    "192.168.1.24:8099",
+		running: true,
+		devices: 3,
+		compose: true,
+	})
 
 	canvas := software.NewCanvas()
 	// Twice the window's own size in pixels, because a screenshot in a README
 	// is read on displays that are not the one it was drawn for.
 	canvas.SetScale(2)
 	canvas.SetContent(pane.content)
-	canvas.Resize(fyne.NewSize(460, 300))
+	canvas.Resize(fyne.NewSize(480, 380))
 
 	if err := os.MkdirAll("docs", 0o755); err != nil {
 		t.Fatal(err)

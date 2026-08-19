@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -77,12 +79,40 @@ func startGUI() {
 // with it; and the blocking Start() stays off the main thread, which on macOS
 // belongs to the UI and nothing else.
 type server struct {
-	addr, dir, token string
-	cmd              *exec.Cmd
-	done             chan struct{}
+	dir, token string
+	cmd        *exec.Cmd
+	done       chan struct{}
+
+	// The bind address moves while the window is open, and the goroutine that
+	// moves it is not the one polling /metrics two seconds later. One mutex
+	// around one string, because "it is only a string" is how a torn read gets
+	// shipped.
+	mu   sync.Mutex
+	addr string
 }
 
+func (s *server) bind() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.addr
+}
+
+func (s *server) setBind(addr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addr = addr
+}
+
+// managed is true when a systemd unit exists, which makes that unit the owner
+// of the server and this window a remote control for it. Never both: two
+// processes writing one SQLite file is how a sync server corrupts itself, and
+// the window has no way to notice it has happened.
+func (s *server) managed() bool { return serviceInstalled() }
+
 func (s *server) running() bool {
+	if s.managed() {
+		return serviceActive()
+	}
 	if s.cmd == nil {
 		return false
 	}
@@ -95,12 +125,16 @@ func (s *server) running() bool {
 }
 
 func (s *server) start() error {
+	if s.managed() {
+		return systemctl("start", unitName)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(exe, "serve", "--http="+s.addr, "--dir="+s.dir)
+	cmd := exec.Command(exe, "serve", "--http="+s.bind(), "--dir="+s.dir)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 
 	// The status pane reads the child's own /metrics rather than opening the
@@ -123,6 +157,10 @@ func (s *server) start() error {
 }
 
 func (s *server) stop() {
+	if s.managed() {
+		_ = systemctl("stop", unitName)
+		return
+	}
 	if !s.running() {
 		return
 	}
@@ -143,7 +181,7 @@ func (s *server) stop() {
 // stats asks the running server what it holds. Zeroes when it is not up,
 // which is the same thing the pane wants to show anyway.
 func (s *server) stats() (up bool, devices, entries float64) {
-	req, err := http.NewRequest("GET", "http://"+s.addr+"/metrics", nil)
+	req, err := http.NewRequest("GET", "http://"+s.bind()+"/metrics", nil)
 	if err != nil {
 		return false, 0, 0
 	}
@@ -210,6 +248,18 @@ func dirSize(dir string) int64 {
 	return total
 }
 
+// paneState is everything the body is drawn from: text, and a handful of
+// flags. A struct rather than six positional arguments, because that is what
+// six positional booleans and strings turn into at the third call site.
+type paneState struct {
+	status, counts, dir, addr string
+	running                   bool
+	devices                   int
+	compose                   bool // a docker-compose.yml was found next to us
+	service                   bool // "Start at login" is on
+	docker                    bool // ...and the unit runs the container
+}
+
 // guiPane is the window's body: the widgets that change while the server runs,
 // and the layout holding them.
 //
@@ -220,49 +270,170 @@ func dirSize(dir string) int64 {
 type guiPane struct {
 	status, counts          *widget.Label
 	toggle, dashboard, pair *widget.Button
+	bind                    *widget.Select
+	port                    *widget.Entry
+	atLogin                 *widget.Check
+	runAs                   *widget.RadioGroup
 	content                 fyne.CanvasObject
 }
 
-func newGUIPane(status, counts, dir string, running bool) *guiPane {
+// The two things a unit can run, spelled once. They are radio labels and they
+// are also what the window reads back to decide which is selected.
+const (
+	runDirect = "this binary"
+	runDocker = "docker compose"
+)
+
+func newGUIPane(state paneState) *guiPane {
 	pane := &guiPane{
-		status:    widget.NewLabel(status),
-		counts:    widget.NewLabel(counts),
+		status:    widget.NewLabel(state.status),
+		counts:    widget.NewLabel(state.counts),
 		toggle:    widget.NewButton("Start", nil),
 		dashboard: widget.NewButton("Open dashboard", nil),
-		pair:      widget.NewButton("Pair a device", nil),
+		pair:      widget.NewButton(pairButtonText(state.devices), nil),
 	}
 
 	// The dashboard is PocketBase's, served by the child process, so there is
 	// nothing to open until that process is up.
-	if running {
+	if state.running {
 		pane.toggle.SetText("Stop")
 	} else {
 		pane.dashboard.Disable()
 	}
 
+	// The address, offered rather than typed. Loopback and everything are the
+	// two answers that are not addresses, and after them every address this
+	// machine actually answers on — the same list, found the same way, that
+	// the pairing dialog offers a phone.
+	host, port := splitBind(state.addr)
+	hosts := bindHosts(host)
+	labels := make([]string, len(hosts))
+	for i, candidate := range hosts {
+		labels[i] = candidate.String()
+	}
+	pane.bind = widget.NewSelect(labels, nil)
+	for i, candidate := range hosts {
+		if candidate.ip == host {
+			pane.bind.SetSelectedIndex(i)
+			break
+		}
+	}
+	// Given a width rather than left to the layout: in a Border the port sits
+	// in the trailing slot at its own minimum size, and an entry's minimum is
+	// narrower than the four digits it is holding.
+	pane.port = widget.NewEntry()
+	pane.port.SetText(port)
+	portBox := container.NewGridWrap(
+		fyne.NewSize(80, pane.port.MinSize().Height), pane.port)
+
 	// The one line that can be long enough to matter, and the one nothing
 	// updates afterwards, so it needs no field.
-	where := widget.NewLabel(dir)
+	where := widget.NewLabel(state.dir)
 	where.Wrapping = fyne.TextWrapBreak
 
-	pane.content = container.NewVBox(
+	body := []fyne.CanvasObject{
 		pane.status,
 		pane.counts,
 		widget.NewSeparator(),
+		widget.NewLabel("Address"),
+		container.NewBorder(nil, nil, nil, portBox, pane.bind),
 		widget.NewLabel("Data directory"),
 		where,
-		widget.NewSeparator(),
-		container.NewGridWithColumns(3, pane.toggle, pane.dashboard, pane.pair),
-	)
+	}
+
+	// systemd only, so the row appears on the platform where the switch does
+	// something. A checkbox that cannot work is worse than an absent one: it
+	// invites the question of why it did nothing.
+	if runtime.GOOS == "linux" {
+		pane.atLogin = widget.NewCheck("Start at login (systemd user service)", nil)
+		pane.atLogin.SetChecked(state.service)
+
+		options := []string{runDirect}
+		if state.compose {
+			options = append(options, runDocker)
+		}
+		pane.runAs = widget.NewRadioGroup(options, nil)
+		pane.runAs.Horizontal = true
+		if state.docker && state.compose {
+			pane.runAs.SetSelected(runDocker)
+		} else {
+			pane.runAs.SetSelected(runDirect)
+		}
+
+		body = append(body, widget.NewSeparator(), pane.atLogin,
+			container.NewHBox(widget.NewLabel("running"), pane.runAs))
+		if !state.compose {
+			note := widget.NewLabel("No docker-compose.yml beside this binary,\nso only the binary can be run as a service.")
+			note.Wrapping = fyne.TextWrapWord
+			body = append(body, note)
+		}
+	}
+
+	body = append(body, widget.NewSeparator(),
+		container.NewGridWithColumns(3, pane.toggle, pane.dashboard, pane.pair))
+
+	pane.content = container.NewVBox(body...)
 	return pane
 }
 
+// pairButtonText is the whole difference between the two questions this button
+// can be asked. With no devices there is no library and one has to be made
+// from here, because until a device has a token there is nobody to authorise
+// the request. With devices, the library exists and the key that makes it
+// readable lives on those devices — so the honest answer is an explanation,
+// not another library.
+func pairButtonText(devices int) string {
+	if devices > 0 {
+		return "Add a device"
+	}
+	return "Create first device"
+}
+
+// bindHosts is what the Address menu offers.
+//
+// The two non-addresses first, because they are the two decisions: only this
+// machine, or every interface on it. Then every address the machine actually
+// answers on, which is the list the pairing dialog draws from — a bind chosen
+// here is usually chosen so that a phone can reach it.
+func bindHosts(current string) []lanAddr {
+	hosts := append([]lanAddr{{ip: "127.0.0.1"}, {ip: "0.0.0.0"}}, lanAddrs()...)
+
+	for _, candidate := range hosts {
+		if candidate.ip == current {
+			return hosts
+		}
+	}
+	// A hostname, or an address on an interface that is down: keep it rather
+	// than silently rebinding a running server to something else.
+	if current != "" {
+		return append([]lanAddr{{ip: current}}, hosts...)
+	}
+	return hosts
+}
+
 func runGUI(addr, dir string) {
-	token, err := newToken()
+	exe, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// A service installed on an earlier run owns the server, and its address
+	// and metrics token are on disk. Read both back rather than starting from
+	// this window's defaults: a fresh token would leave the pane reporting
+	// zero devices against a server full of them, which reads exactly like a
+	// server nobody has paired with.
+	token := serviceMetricsToken()
+	if token == "" {
+		if token, err = newToken(); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if bind := serviceBind(); bind != "" {
+		addr = bind
+	}
+
 	srv := &server{addr: addr, dir: dir, token: token}
+	compose := composeFile(exe, dir)
 
 	// An id, because the toolkit stores window preferences under one and
 	// complains without. The migration flag alongside it is a statement that
@@ -277,19 +448,41 @@ func runGUI(addr, dir string) {
 	ui := fyneapp.New()
 	window := ui.NewWindow("SummaReader sync server")
 
-	pane := newGUIPane("Stopped", "", dir, false)
+	pane := newGUIPane(paneState{
+		status:  "Stopped",
+		dir:     dir,
+		addr:    addr,
+		compose: compose != "",
+		service: serviceInstalled(),
+		docker:  serviceDocker(),
+	})
+
+	// How many devices the server holds, which decides what the third button
+	// is for. Written and read on the main thread only — refresh writes it
+	// inside fyne.Do, and a tap handler runs there too — so it needs no lock.
+	devices := 0
 
 	// Everything below runs from a background goroutine, so every widget it
 	// touches goes through fyne.Do — the toolkit owns the main thread and
 	// updating a label off it is a race that shows up as a redraw glitch
 	// months later rather than as a crash now.
 	refresh := func() {
-		up, devices, entries := srv.stats()
+		up, deviceCount, entries := srv.stats()
 		size := float64(dirSize(dir)) / (1 << 20)
+		managed := srv.managed()
+		where := srv.bind()
 
 		fyne.Do(func() {
+			devices = int(deviceCount)
 			if up {
-				pane.status.SetText("Running on http://" + addr)
+				// Which of the two is running it, said out loud: with a unit
+				// installed, Start and Stop here drive systemctl, and somebody
+				// who does not know that has no way to find out.
+				status := "Running on http://" + where
+				if managed {
+					status += " (systemd)"
+				}
+				pane.status.SetText(status)
 				pane.toggle.SetText("Stop")
 				pane.dashboard.Enable()
 			} else {
@@ -298,8 +491,27 @@ func runGUI(addr, dir string) {
 				pane.dashboard.Disable()
 			}
 			pane.counts.SetText(fmt.Sprintf("%s · %s · %.1f MB",
-				plural(devices, "device"), plural(entries, "entry"), size))
+				plural(deviceCount, "device"), plural(entries, "entry"), size))
+			pane.pair.SetText(pairButtonText(devices))
 		})
+	}
+
+	fail := func(err error) {
+		fyne.Do(func() { dialog.ShowError(err, window) })
+	}
+
+	// serviceOf reads the config out of the widgets, on the main thread, so
+	// the goroutine that installs a unit is never reading a widget the toolkit
+	// owns. Cheap, and the alternative is a lock around three strings.
+	serviceOf := func() serviceConfig {
+		config := serviceConfig{
+			exe: exe, addr: srv.bind(), dir: dir, token: srv.token,
+			uid: os.Getuid(), gid: os.Getgid(),
+		}
+		if pane.runAs != nil && pane.runAs.Selected == runDocker {
+			config.compose = compose
+		}
+		return config
 	}
 
 	pane.toggle.OnTapped = func() {
@@ -307,37 +519,118 @@ func runGUI(addr, dir string) {
 			if srv.running() {
 				srv.stop()
 			} else if err := srv.start(); err != nil {
-				fyne.Do(func() { dialog.ShowError(err, window) })
+				fail(err)
 			}
 			refresh()
 		}()
+	}
+
+	// Rebinding is a restart, because a listening socket cannot be moved. The
+	// unit is rewritten too when there is one — otherwise the address changes
+	// here and comes back the old one at the next login, with nothing said.
+	applyBind := func() {
+		host := srv.bind()
+		if pane.bind.Selected != "" {
+			host = strings.Fields(pane.bind.Selected)[0]
+		}
+		port := strings.TrimSpace(pane.port.Text)
+		if port == "" {
+			port = "8099"
+		}
+		next := net.JoinHostPort(host, port)
+		if next == srv.bind() {
+			return
+		}
+		config := serviceOf()
+		config.addr = next
+
+		go func() {
+			wasRunning := srv.running()
+			srv.stop()
+			srv.setBind(next)
+			if serviceInstalled() {
+				if err := installService(config); err != nil {
+					fail(err)
+				}
+			} else if wasRunning {
+				if err := srv.start(); err != nil {
+					fail(err)
+				}
+			}
+			refresh()
+		}()
+	}
+	pane.bind.OnChanged = func(string) { applyBind() }
+	pane.port.OnSubmitted = func(string) { applyBind() }
+
+	if pane.atLogin != nil {
+		pane.atLogin.OnChanged = func(on bool) {
+			config := serviceOf()
+			go func() {
+				var err error
+				if on {
+					// The window's own child lets go first: installing enables
+					// and starts the unit, and the port and the database can
+					// only have one owner.
+					srv.stop()
+					err = installService(config)
+				} else {
+					err = uninstallService()
+				}
+				if err != nil {
+					fail(err)
+					fyne.Do(func() { pane.atLogin.SetChecked(!on) })
+				}
+				refresh()
+			}()
+		}
+
+		// Switching between binary and container is the same install, with a
+		// different ExecStart. Only meaningful once the switch above is on.
+		pane.runAs.OnChanged = func(string) {
+			if !pane.atLogin.Checked {
+				return
+			}
+			config := serviceOf()
+			go func() {
+				if err := installService(config); err != nil {
+					fail(err)
+				}
+				refresh()
+			}()
+		}
 	}
 
 	// PocketBase's admin interface, which is the real one. Nothing here
 	// reimplements any of it — the window exists for the three things it has
 	// no answer for: is it up, start it, and get a token onto a device.
 	pane.dashboard.OnTapped = func() {
-		if link, err := url.Parse("http://" + addr + "/_/"); err == nil {
+		if link, err := url.Parse("http://" + srv.bind() + "/_/"); err == nil {
 			_ = ui.OpenURL(link)
 		}
 	}
 
 	pane.pair.OnTapped = func() {
+		// Read on the main thread, where refresh wrote it.
+		if devices > 0 {
+			showAddDevice(devices, srv.bind(), window)
+			return
+		}
 		go func() {
-			device, err := runPair(srv)
+			device, err := runFirstDevice(srv)
 			fyne.Do(func() {
 				if err != nil {
 					dialog.ShowError(err, window)
 					return
 				}
-				showToken(device, addr, window)
+				showToken(device, srv.bind(), window)
 			})
 			refresh()
 		}()
 	}
 
 	window.SetContent(pane.content)
-	window.Resize(fyne.NewSize(460, 300))
+	window.Resize(fyne.NewSize(480, 400))
 
 	go func() {
 		for {
@@ -350,17 +643,61 @@ func runGUI(addr, dir string) {
 
 	// Closing the window stops the server it started. Leaving a child running
 	// with nothing supervising it means the next Start finds the port taken
-	// and no way from here to see why.
-	srv.stop()
+	// and no way from here to see why. A service is left alone: being left
+	// running is the entire point of having installed one.
+	if !srv.managed() {
+		srv.stop()
+	}
 }
 
-// runPair issues a first device by running this same binary's `pair`.
+// showAddDevice answers the question the button used to answer wrongly.
+//
+// Clicking it a second time used to mint a second library — a new account, a
+// new token, and no relation to the one the devices are already sharing. It
+// looked like it worked and it synced nothing. What actually adds a device is
+// a pairing code from an app, because that code carries the master key and
+// this server has never held one.
+func showAddDevice(devices int, addr string, window fyne.Window) {
+	where := reachableURL(addr)
+	if where == "" {
+		where = "http://" + addr
+	}
+	command := "curl -X POST " + where + "/enroll \\\n" +
+		"  -H 'Authorization: Bearer <a token this account already has>' \\\n" +
+		`  -d '{"label":"Phone"}'`
+
+	explain := widget.NewLabel(fmt.Sprintf(
+		"This server already holds a library — %s.\n\n"+
+			"A new device joins it by scanning a pairing code in SummaReader, on a "+
+			"device that is already set up. That code carries the master key, and the "+
+			"key is what makes the library readable. This server has never held it and "+
+			"is not supposed to, so there is nothing here that can replace it.\n\n"+
+			"The app also asks the server for the new device's own token while it does "+
+			"that. By hand, that request is:",
+		plural(float64(devices), "device")))
+	explain.Wrapping = fyne.TextWrapWord
+
+	field := widget.NewMultiLineEntry()
+	field.SetText(command)
+
+	body := container.NewVBox(
+		explain,
+		field,
+		widget.NewButton("Copy", func() { window.Clipboard().SetContent(command) }),
+		widget.NewLabel("Creating a first device again would make a second, separate\nlibrary — which is why this button is no longer offering to."),
+	)
+
+	dialog.ShowCustom("Add a device", "Done", body, window)
+}
+
+// runFirstDevice issues a first device by running this same binary's
+// `first-device`.
 //
 // The server steps aside while it does. `pair` writes the account into the
 // very database the server has open, and rather than reason about two writers
 // on one SQLite file, this stops the child, runs the command that already
 // exists, and puts the server back if it was up.
-func runPair(srv *server) (*Device, error) {
+func runFirstDevice(srv *server) (*Device, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -374,9 +711,14 @@ func runPair(srv *server) (*Device, error) {
 		}
 	}()
 
+	// `first-device` and not the `pair` alias it still answers to: the alias
+	// prints a deprecation note, PocketBase points cobra's writers at stdout,
+	// and so the note lands in front of the JSON and nothing here can parse
+	// it. That was this button reporting "pairing produced no token".
+	//
 	// --json, because the human-readable form prints a wall of migration
 	// output around the token and this needs the token itself.
-	out, err := exec.Command(exe, "pair", "--dir="+srv.dir, "--json").Output()
+	out, err := exec.Command(exe, "first-device", "--dir="+srv.dir, "--json").Output()
 	if err != nil {
 		return nil, err
 	}
