@@ -1,7 +1,7 @@
 # A self-hosted SummaReader sync server.
 #
 #   docker compose up -d
-#   docker compose exec sync summareader-sync pair "My library" "Desktop" --dir=/data
+#   docker compose exec sync summareader-sync first-device "My library" "Desktop" --dir=/data
 #
 # The second command prints a token once. Paste it into SummaReader on that
 # device; every device after it is enrolled from one already paired, with no
@@ -32,8 +32,19 @@ services:
       # on a network you control it is the ordinary way to sync a phone, and
       # anywhere less private it wants a TLS terminator in front and
       # `127.0.0.1:8099:8099` here again.
-      - "127.0.0.1:8099:8099"
-      - "${SYNC_BIND:-10.10.20.1}:8099:8099"
+      #
+      # The port is a variable because the desktop window can install a
+      # systemd unit that runs this file, and the address chosen in that
+      # window has to be able to reach the container. Inside it is always
+      # 8099 — that is what the image serves on.
+      - "127.0.0.1:${SYNC_PORT:-8099}:8099"
+      - "${SYNC_BIND:-10.10.20.1}:${SYNC_PORT:-8099}:8099"
+
+    environment:
+      # Off unless something sets it, exactly as outside Docker: the endpoint
+      # 404s without a token. The desktop window sets it in the unit it writes,
+      # so its status pane can read the counts out of a container it started.
+      SUMMAREADER_METRICS_TOKEN: "${SUMMAREADER_METRICS_TOKEN:-}"
 
     # The container writes as whoever owns ./pb_data, so the same database
     # works whether the server is run in Docker or straight from the host.

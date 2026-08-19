@@ -121,5 +121,5 @@ fi
 if [ ! -s "$data_dir/data.db" ]; then
   echo
   echo "Nothing paired yet. The first device is issued from a shell:"
-  echo "  $bin_dir/$name pair \"My library\" \"Desktop\" --dir=$data_dir"
+  echo "  $bin_dir/$name first-device \"My library\" \"Desktop\" --dir=$data_dir"
 fi
