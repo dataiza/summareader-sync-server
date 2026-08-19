@@ -1,0 +1,38 @@
+name: summareader_sync_console
+description: The desktop console for the SummaReader sync server.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The look, copied in rather than fetched. See packages/summareader_ui/VENDORED.md.
+  summareader_ui:
+    path: packages/summareader_ui
+
+  qr_flutter: ^4.1.0
+  url_launcher: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Bundled, and copied here by scripts/sync-ui.sh. The package names these
+  # two families in every style it defines; without the files the console
+  # falls back to whatever the platform has, which is precisely the "looks
+  # like a toolkit's defaults" problem it was built to fix.
+  fonts:
+    - family: Caprasimo
+      fonts:
+        - asset: assets/fonts/Caprasimo-Regular.ttf
+    - family: Figtree
+      fonts:
+        - asset: assets/fonts/Figtree-Variable.ttf

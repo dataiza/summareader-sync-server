@@ -1,0 +1,471 @@
+import 'package:flutter/material.dart';
+import 'package:summareader_ui/summareader_ui.dart';
+
+import 'addresses.dart';
+import 'format.dart';
+import 'pairing.dart';
+import 'server.dart';
+
+/// Everything the console is drawn from: a handful of strings, a handful of
+/// flags, and the device list.
+///
+/// A value rather than a live server, so the same layout can be rendered with
+/// no server, no systemd and no display — which is how the picture in the
+/// documentation is taken. A window whose screenshot can only be produced by
+/// hand is a window whose screenshot is quietly out of date.
+class ConsoleState {
+  const ConsoleState({
+    required this.dir,
+    required this.addr,
+    this.running = false,
+    this.managed = false,
+    this.devices = 0,
+    this.entries = 0,
+    this.bytes = 0,
+    this.paired = const [],
+    this.hosts = const [],
+    this.atLogin = false,
+    this.docker = false,
+    this.compose = false,
+    this.linux = true,
+    this.serverBinary,
+    this.error,
+  });
+
+  final String dir;
+  final String addr;
+  final bool running;
+
+  /// Whether a systemd unit exists, which makes systemd the owner of the
+  /// server and this window a remote control for it.
+  final bool managed;
+
+  final int devices;
+  final int entries;
+  final int bytes;
+  final List<PairedDevice> paired;
+
+  /// The addresses the bind chooser offers, already in the order it offers
+  /// them: the two decisions, then what this machine answers on.
+  final List<LanAddr> hosts;
+
+  final bool atLogin;
+  final bool docker;
+  final bool compose;
+
+  /// Whether "Start at login" exists at all. A control that cannot work is
+  /// worse than an absent one: it invites the question of why it did nothing.
+  final bool linux;
+
+  /// The server binary this console would run, or null when there is none.
+  final String? serverBinary;
+
+  /// The last thing that went wrong, shown where it happened rather than in a
+  /// box that has to be dismissed before the window can be read again.
+  final String? error;
+
+  String get statusLine {
+    if (serverBinary == null) return 'No server binary found';
+    if (!running) return 'Stopped';
+    // Who is running it is the badge beside this line, not more words in it.
+    return 'Running on http://$addr';
+  }
+
+  /// The same state with a different message, or none. Two one-line copiers
+  /// rather than a general copyWith: these are the only two fields anything
+  /// changes without rebuilding the whole thing from a poll.
+  ConsoleState withError(String? message) =>
+      _copy(error: message, keepError: false);
+
+  ConsoleState withDocker(bool value) => _copy(docker: value);
+
+  ConsoleState _copy({bool? docker, String? error, bool keepError = true}) =>
+      ConsoleState(
+        dir: dir,
+        addr: addr,
+        running: running,
+        managed: managed,
+        devices: devices,
+        entries: entries,
+        bytes: bytes,
+        paired: paired,
+        hosts: hosts,
+        atLogin: atLogin,
+        docker: docker ?? this.docker,
+        compose: compose,
+        linux: linux,
+        serverBinary: serverBinary,
+        error: keepError ? this.error : error,
+      );
+
+  String get countsLine =>
+      '${plural(devices, 'device')} · ${plural(entries, 'entry')} · '
+      '${megabytes(bytes)}';
+}
+
+/// The console's body.
+///
+/// Built from [ConsoleState] and a set of callbacks, with nothing in it that
+/// starts a process or reads a socket — see the class comment there.
+class ConsoleView extends StatelessWidget {
+  const ConsoleView({
+    super.key,
+    required this.state,
+    this.onToggle,
+    this.onDashboard,
+    this.onPair,
+    this.onBind,
+    this.onPort,
+    this.onAtLogin,
+    this.onRunAs,
+  });
+
+  final ConsoleState state;
+  final VoidCallback? onToggle;
+  final VoidCallback? onDashboard;
+  final VoidCallback? onPair;
+  final ValueChanged<String>? onBind;
+  final ValueChanged<String>? onPort;
+  final ValueChanged<bool>? onAtLogin;
+  final ValueChanged<bool>? onRunAs;
+
+  @override
+  Widget build(BuildContext context) {
+    const title = 'Sync server';
+    return SingleChildScrollView(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(26, 30, 26, 60),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Ar.headingStyle(32, forText: title)),
+                const SizedBox(height: 6),
+                Text(
+                  'Your own library, on your own machine. Nothing here can '
+                  'read what it holds.',
+                  style: Ar.bodyStyle(13.5, color: Ar.dim(0.6)),
+                ),
+                const SizedBox(height: 26),
+                _status(context),
+                _devices(),
+                _address(),
+                if (state.linux) _atLogin(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // The section shape the app uses everywhere: a heading, a line saying what
+  // the group is for, and one card of rows.
+  Widget _section(String title, String blurb, Widget child) => Padding(
+    padding: const EdgeInsets.only(bottom: 30),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Ar.headingStyle(19, forText: title)),
+        const SizedBox(height: 4),
+        Text(blurb, style: Ar.bodyStyle(13.5, color: Ar.dim(0.6))),
+        const SizedBox(height: 14),
+        child,
+      ],
+    ),
+  );
+
+  Widget _card(List<Widget> rows) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: Ar.surface,
+      borderRadius: BorderRadius.circular(Ar.radiusMd),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          rows[i],
+          if (i != rows.length - 1) const SizedBox(height: 16),
+        ],
+      ],
+    ),
+  );
+
+  /// A setting: what it is called on the left, what changes it on the right —
+  /// or above and below, on a window too narrow for both.
+  Widget _row(String label, Widget control, {String? hint}) {
+    final words = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Ar.bodyStyle(14)),
+        if (hint != null)
+          Text(hint, style: Ar.bodyStyle(12, color: Ar.dim(0.6))),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, row) => row.maxWidth < narrowWindow
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                words,
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerLeft, child: control),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: words),
+                Flexible(child: control),
+              ],
+            ),
+    );
+  }
+
+  Widget _status(BuildContext context) {
+    final missing = state.serverBinary == null;
+    return _section(
+      'Status',
+      'Whether the server is up, where it is, and who is running it.',
+      _card([
+        Row(
+          children: [
+            // A dot rather than the word: the state is read at a glance from
+            // across a desk, and the address beside it is what has to be read
+            // properly.
+            Container(
+              width: 10,
+              height: 10,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: state.running ? Ar.accent2500 : Ar.neutral400,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                state.statusLine,
+                style: Ar.bodyStyle(15, weight: FontWeight.w600),
+              ),
+            ),
+            // Which of the two is running it, said out loud: with a unit
+            // installed, Start and Stop drive systemctl, and somebody who does
+            // not know that has no way to find out.
+            if (state.managed) const Tag(label: 'systemd'),
+          ],
+        ),
+        Text(state.countsLine, style: Ar.bodyStyle(13, color: Ar.dim(0.6))),
+        if (missing)
+          Text(
+            'No summareader-sync beside this console or on PATH. Build one '
+            'with scripts/build.sh, or point SUMMAREADER_SYNC_BIN at it.',
+            style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
+          ),
+        if (state.error case final message?)
+          Text(
+            message,
+            style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
+          ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            PrimaryButton(
+              label: state.running ? 'Stop' : 'Start',
+              icon: state.running
+                  ? Icons.stop_circle_outlined
+                  : Icons.play_arrow_rounded,
+              onTap: missing ? null : onToggle,
+            ),
+            // PocketBase's admin interface is the real one, and it is served
+            // by the server — so there is nothing to open until it is up.
+            PillButton(
+              label: 'Open dashboard',
+              icon: Icons.open_in_new,
+              height: 40,
+              onTap: state.running ? onDashboard : null,
+            ),
+            PillButton(
+              label: pairButtonText(state.devices),
+              icon: Icons.qr_code_2,
+              height: 40,
+              onTap: onPair,
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+
+  /// Every device is listed, revoked ones included: a device that has been
+  /// stopped is something whoever stopped it should still be able to see. So
+  /// is one that has never sent anything — that device is either new or not
+  /// getting through, and leaving it out hides both.
+  Widget _devices() => _section(
+    'Devices',
+    'Who is paired with this server, and when each was last heard from.',
+    _card(
+      state.paired.isEmpty
+          ? [
+              Text(
+                'No devices paired yet.',
+                style: Ar.bodyStyle(13.5, color: Ar.dim(0.6)),
+              ),
+            ]
+          : [for (final device in state.paired) _deviceRow(device)],
+    ),
+  );
+
+  Widget _deviceRow(PairedDevice device) {
+    // A device whose token was minted without a label. Its id is not a name,
+    // but it is what distinguishes it from the others.
+    final name = device.label.isEmpty ? device.id : device.label;
+    return Row(
+      children: [
+        KindBadge(
+          icon: device.revoked ? Icons.block : Icons.phone_iphone_outlined,
+          background: device.revoked ? Ar.neutral300 : Ar.accent2200,
+          foreground: device.revoked ? Ar.dim(0.5) : Ar.accent2800,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: Ar.bodyStyle(14, weight: FontWeight.w600)),
+              Text(
+                '${ago(device.lastSeen)} · '
+                '${plural(device.entries, 'entry')} sent',
+                style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+              ),
+            ],
+          ),
+        ),
+        if (device.revoked)
+          Tag(
+            label: 'revoked',
+            background: Ar.neutral300,
+            foreground: Ar.dim(0.7),
+          ),
+      ],
+    );
+  }
+
+  Widget _address() {
+    final (host, port) = splitBind(state.addr);
+    return _section(
+      'Address',
+      'Where the server listens. Changing either restarts it — and rewrites '
+          'the unit when there is one.',
+      _card([
+        _row(
+          'Bind address',
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            alignment: WrapAlignment.end,
+            children: [
+              for (final candidate in state.hosts)
+                Segment(
+                  label: candidate.toString(),
+                  selected: candidate.ip == host,
+                  onTap: onBind == null ? null : () => onBind!(candidate.ip),
+                ),
+            ],
+          ),
+          hint:
+              'Loopback and 0.0.0.0 are the two decisions; the rest are '
+              'addresses this machine answers on.',
+        ),
+        _row(
+          'Port',
+          SizedBox(
+            width: 110,
+            child: _PortField(port: port, onSubmitted: onPort),
+          ),
+        ),
+        _row(
+          'Data directory',
+          Text(
+            state.dir,
+            textAlign: TextAlign.end,
+            style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+          ),
+          hint: 'Set with --dir at launch; not editable here.',
+        ),
+      ]),
+    );
+  }
+
+  Widget _atLogin() => _section(
+    'Start at login',
+    'A systemd user service, so the server comes back after a reboot without '
+        'this window.',
+    _card([
+      _row(
+        'Keep it running',
+        ArSwitch(
+          value: state.atLogin,
+          label: 'Start at login',
+          onChanged: onAtLogin,
+        ),
+        hint: 'Writes ~/.config/systemd/user/summareader-sync.service.',
+      ),
+      if (state.compose) ...[
+        RadioRow(
+          label: 'This binary',
+          hint: 'The unit runs summareader-sync serve directly.',
+          selected: !state.docker,
+          onTap: onRunAs == null ? null : () => onRunAs!(false),
+        ),
+        RadioRow(
+          label: 'docker compose',
+          hint:
+              'The unit brings the container up instead, with the bind '
+              'address passed in as SYNC_BIND and SYNC_PORT.',
+          selected: state.docker,
+          onTap: onRunAs == null ? null : () => onRunAs!(true),
+        ),
+      ] else
+        Text(
+          'No docker-compose.yml beside this binary, so only the binary can '
+          'be run as a service.',
+          style: Ar.bodyStyle(12.5, color: Ar.dim(0.6), height: 1.5),
+        ),
+    ]),
+  );
+}
+
+/// The port, in a field that keeps its own text.
+///
+/// Its own widget because a controller rebuilt on every poll loses the caret
+/// twice a second, which is a field nobody can type four digits into.
+class _PortField extends StatefulWidget {
+  const _PortField({required this.port, this.onSubmitted});
+
+  final String port;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<_PortField> createState() => _PortFieldState();
+}
+
+class _PortFieldState extends State<_PortField> {
+  late final _controller = TextEditingController(text: widget.port);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ArField(
+    controller: _controller,
+    background: Ar.neutral100,
+    onSubmitted: widget.onSubmitted,
+  );
+}

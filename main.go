@@ -64,7 +64,6 @@ func main() {
 	})
 
 	registerCommands(app)
-	registerGUI(app)
 
 	// A persistent flag on the root, not a flag on `serve`.
 	//
@@ -79,16 +78,6 @@ func main() {
 		log.Fatal(err)
 		os.Exit(1)
 	}
-
-	// The window opens here, after Start has returned, rather than inside the
-	// command that asked for it. PocketBase runs the root command on a
-	// goroutine of its own, with the database already open — so a window drawn
-	// from there would be drawing from a thread macOS does not let anything
-	// draw from, while holding open the database that the server it is about
-	// to start has to have to itself. Coming back here first gives up both:
-	// the first thread is free again, and Start's shutdown closed the
-	// database. In a build without a window this does nothing at all.
-	startGUI()
 }
 
 // Where the database goes when nothing says otherwise.

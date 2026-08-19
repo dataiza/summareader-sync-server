@@ -1,0 +1,22 @@
+name: summareader_ui
+description: >-
+  The way SummaReader looks: one palette, one set of type styles, and the
+  widgets built from them. Its own package because the app is no longer the
+  only thing that has to look like SummaReader — the consoles that run the
+  sync server and the MCP mirror are Flutter windows too, and a second copy of
+  a palette is a second design six months later.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+  flutter: '>=3.27.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

@@ -7,3 +7,11 @@ allreader-sync-server
 
 # Where scripts/build.sh puts things.
 dist/
+
+# The console's build output and pub cache. The Go module never sees console/
+# — it has no .go files in it — but git would happily commit a 60 MB bundle.
+console/build/
+console/.dart_tool/
+console/linux/flutter/ephemeral/
+console/windows/flutter/ephemeral/
+console/macos/Flutter/ephemeral/
