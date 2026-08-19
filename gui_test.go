@@ -45,7 +45,7 @@ func TestThePairingCodeCarriesTheAddressAndTokenAndNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := `{"v":1,"u":"http://192.168.1.24:8099","t":"tok-43-chars"}`
+	want := `{"version":2,"server":"http://192.168.1.24:8099","device_token":"tok-43-chars"}`
 	if payload != want {
 		t.Fatalf("payload:\n got %s\nwant %s", payload, want)
 	}

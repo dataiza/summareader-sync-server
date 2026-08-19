@@ -860,12 +860,18 @@ func runFirstDevice(srv *server) (*Device, error) {
 // to — so a code minted here says only "here is my server, here is a token",
 // which is exactly what typing those two things by hand would say. The shape
 // is a contract with the app; a renamed field is a phone that refuses to scan.
+//
+// Version 2 spells the fields out. They were `v`, `u` and `t`, which is fine
+// for a QR and useless to the person reading the same code as text, deciding
+// whether it is the one that carries a key. The app reads both spellings, so
+// an older phone scanning this still pairs; a version older than that reads
+// neither and says the code is not one it knows, which is the honest answer.
 func pairingPayload(serverURL, token string) (string, error) {
 	payload, err := json.Marshal(struct {
-		V int    `json:"v"`
-		U string `json:"u"`
-		T string `json:"t"`
-	}{1, serverURL, token})
+		Version int    `json:"version"`
+		Server  string `json:"server"`
+		Token   string `json:"device_token"`
+	}{2, serverURL, token})
 	return string(payload), err
 }
 
