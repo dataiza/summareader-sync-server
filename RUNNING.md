@@ -136,8 +136,15 @@ cd console && flutter run -d linux    # from source
 separate program, and the server binary has no `gui` in it any more. It runs
 the release build when one exists and falls back to `flutter run` when it does
 not; it builds the server first if Go is here, so Start has something to
-start; and it passes on the same `SYNC_ADDR` and `SYNC_DIR` the other `run.sh`
-commands use. That last part is the point: a console opening
+start; and it passes `SYNC_DIR` so the window opens this checkout's library
+rather than the one in `~/.config`.
+
+**`SYNC_ADDR` is passed only if you set it.** A flag beats the config file, so
+passing an address every time meant the one chosen in the window was written
+to the file, ignored at the next launch, and looked like a console that
+forgets what it was told. Left unset, the address comes from the config inside
+the data directory — which is the point of keeping one directory per
+installation. That last part is the point: a console opening
 `~/.config/summareader-sync` while `run.sh` serves `./pb_data` would report an
 empty server and be right about the wrong database.
 

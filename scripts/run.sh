@@ -44,7 +44,16 @@ fi
 if [ "${1:-}" = "gui" ]; then
   shift
   dir="${SYNC_DIR:-$PWD/pb_data}"
-  addr="${SYNC_ADDR:-127.0.0.1:8099}"
+
+  # The address is passed *only* when somebody said one. It used to be passed
+  # always, defaulted to loopback — and a flag beats the config file by
+  # design, so the address chosen in the window was written to the file,
+  # ignored at the next launch, and looked like a console that forgets. The
+  # directory is still passed, because that is what selects this checkout's
+  # library rather than the one in ~/.config; the address then comes from the
+  # config inside it, which is the point of keeping one directory per
+  # installation.
+  addr=("${SYNC_ADDR:+--http=$SYNC_ADDR}")
 
   # Built first, and only if Go is here: without a binary the console opens
   # with Start greyed out and a line saying what is missing, which is honest
@@ -62,7 +71,7 @@ if [ "${1:-}" = "gui" ]; then
   # The release build when there is one: it starts at once and needs no
   # toolchain. Otherwise the development run, which needs Flutter.
   if [ -x "$bundle" ]; then
-    exec "$bundle" --dir="$dir" --http="$addr" "$@"
+    exec "$bundle" --dir="$dir" "${addr[@]}" "$@"
   fi
   command -v flutter >/dev/null || {
     echo "No Flutter, and no console built yet." >&2
@@ -71,9 +80,10 @@ if [ "${1:-}" = "gui" ]; then
     exit 1
   }
   cd console
-  exec flutter run -d "$device" --release \
-    --dart-entrypoint-args="--dir=$dir" \
-    --dart-entrypoint-args="--http=$addr" "$@"
+  args=(--dart-entrypoint-args="--dir=$dir")
+  [ -n "${SYNC_ADDR:-}" ] &&
+    args+=(--dart-entrypoint-args="--http=$SYNC_ADDR")
+  exec flutter run -d "$device" --release "${args[@]}" "$@"
 fi
 
 command -v go >/dev/null || {
