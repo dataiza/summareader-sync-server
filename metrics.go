@@ -14,14 +14,22 @@ import (
 // Prometheus can tell a counter reset from a rollback.
 var started = time.Now()
 
-// The token a scraper must present, from SUMMAREADER_METRICS_TOKEN.
+// The token a scraper must present: SUMMAREADER_METRICS_TOKEN, or
+// `metrics_token` in the config file when the environment is silent.
 //
 // Empty means the endpoint is off. Off by default and never derived from a
 // device token: a scraper is not a device, and a monitoring system holding a
 // credential that can also read the log is a monitoring system that has the
 // library.
+//
+// Read per request rather than once, so the environment still decides at the
+// moment it is asked — which is what the tests rely on and what a `docker
+// compose up` with a new value gets without a rebuild.
 func metricsToken() string {
-	return strings.TrimSpace(os.Getenv("SUMMAREADER_METRICS_TOKEN"))
+	if token := strings.TrimSpace(os.Getenv("SUMMAREADER_METRICS_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(settings.MetricsToken)
 }
 
 // What the server can honestly say about itself.

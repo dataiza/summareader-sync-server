@@ -15,3 +15,7 @@ console/.dart_tool/
 console/linux/flutter/ephemeral/
 console/windows/flutter/ephemeral/
 console/macos/Flutter/ephemeral/
+
+# A real config, beside a real database. The example is the one that is
+# committed.
+summareader-sync.json

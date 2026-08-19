@@ -46,6 +46,11 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" \
 `darwin/amd64` all work from any of them. `-s -w` drops the debug information,
 which is a third of the size and nothing else.
 
+No build tags, and no dependency for reading its own configuration: the JSON
+file described in [RUNNING.md](RUNNING.md#configuration) is `encoding/json` and
+`os`, which is the whole of what a config file needs and the reason this still
+cross-compiles to five targets from one machine with no C toolchain on it.
+
 ## The console — by hand
 
 ```sh
@@ -114,7 +119,7 @@ font rendering differs between the machine that drew the picture and the one
 checking it. The `console` job in `.github/workflows/ci.yml` runs the analyzer,
 the formatter and the rest of the suite.
 
-`./scripts/smoke.sh` is the other half: twelve checks against a real container,
+`./scripts/smoke.sh` is the other half: fourteen checks against a real container,
 covering everything around the handlers that can be broken while every unit
 test passes. See [RUNNING.md](RUNNING.md#checking-a-deployment).
 

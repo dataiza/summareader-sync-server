@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to summareader-sync.json inside the data directory — beside data.db, so one directory is the whole installation. Every key here is also a flag and an environment variable, and they win in that order: flag, then environment, then this file. Keys this server does not know are kept when it writes the file back, so notes like these survive.",
+  "_http": "What `serve` binds to, host:port. Also --http and SUMMAREADER_HTTP. The desktop console writes this key when the address is changed in the window, which is how that choice survives closing it. Omit to leave PocketBase's own default alone.",
+  "http": "127.0.0.1:8099",
+  "_dir": "Where the database lives. Also --dir and SUMMAREADER_DIR. Chicken-and-egg: this file is looked for inside the data directory, so a `dir` here is read from the default location and then moves the database — say it with --dir or SUMMAREADER_DIR instead unless you know why you want this.",
+  "dir": "",
+  "_metrics_token": "The credential a scraper presents to /metrics, as `Authorization: Bearer …`. Empty means the endpoint 404s, which is the default and the right answer for a server nobody is monitoring. Any long random string: openssl rand -hex 24. Also SUMMAREADER_METRICS_TOKEN. The desktop console never writes this — see RUNNING.md for why.",
+  "metrics_token": "",
+  "_no_announce": "Do not advertise this server on the local network. Also --no-announce and SUMMAREADER_NO_ANNOUNCE. The announcement is only ever a convenience — the address works either way.",
+  "no_announce": false
+}

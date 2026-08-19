@@ -31,6 +31,17 @@ expect() {
   esac
 }
 
+# For the checks that are about something *not* being there. A secret that
+# leaks cannot be asserted by looking for the right answer, only by insisting
+# on the absence of the wrong one.
+absent() {
+  local what="$1" got="$2" nope="$3"
+  case "$got" in
+    *"$nope"*) die "$what — found '$nope' in: $got" ;;
+    *) ok "$what" ;;
+  esac
+}
+
 echo "Building and starting…"
 docker compose up -d --build >/dev/null
 
@@ -90,8 +101,10 @@ expect "an unauthenticated append is refused" \
 expect "a second device enrols without a shell" \
   "$(curl -fsS -X POST "$base/enroll" "${auth[@]}" -d '{"label":"Second"}')" \
   '"label":"Second"'
-expect "devices are listed without their tokens" \
-  "$(curl -fsS "$base/devices" "${auth[@]}")" '"token":""'
+# Absent, not empty: the field is `omitempty`, so a listing carries no token
+# key at all. Asserting `"token":""` passed only for as long as it did not.
+absent "devices are listed without their tokens" \
+  "$(curl -fsS "$base/devices" "${auth[@]}")" '"token"'
 
 echo
 echo "Across a restart:"

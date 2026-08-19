@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 
+import 'src/config.dart';
 import 'src/console_screen.dart';
 
 /// The desktop console for the sync server.
@@ -15,10 +16,22 @@ import 'src/console_screen.dart';
 void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // The same precedence the server resolves, for the same two options: flag,
+  // then environment, then the config file beside the data directory, then the
+  // default. The console has to agree with the server about where the server
+  // is, or it opens reporting nothing against a server that is running fine.
+  final env = Platform.environment;
+  final dir =
+      _flag(args, '--dir') ?? env['SUMMAREADER_DIR'] ?? defaultDataDir();
+  final configured = configBind(dir);
+
   runApp(
     ConsoleApp(
-      dir: _flag(args, '--dir') ?? defaultDataDir(),
-      addr: _flag(args, '--http') ?? '127.0.0.1:8099',
+      dir: dir,
+      addr:
+          _flag(args, '--http') ??
+          env['SUMMAREADER_HTTP'] ??
+          (configured.isEmpty ? '127.0.0.1:8099' : configured),
     ),
   );
 }

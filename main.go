@@ -30,9 +30,26 @@ var noAnnounce bool
 // Held for the life of the process. See the comment in OnServe.
 var stopAnnouncing = func() {}
 
+// What the config file and the environment said, read once at startup. The
+// flags are still cobra's, and still win: everything here is only a default.
+var settings Config
+
 func main() {
+	var err error
+	settings, err = resolveConfig(os.Args, os.Getenv)
+	if err != nil {
+		// Refused, not ignored. A config file that exists and does not parse
+		// is somebody's settings, and starting anyway on the defaults means a
+		// server quietly listening somewhere other than where it was told to.
+		log.Fatal(err)
+	}
+
+	dataDir := defaultDataDir()
+	if settings.Dir != "" {
+		dataDir = settings.Dir
+	}
 	app := pocketbase.NewWithConfig(pocketbase.Config{
-		DefaultDataDir: defaultDataDir(),
+		DefaultDataDir: dataDir,
 	})
 
 	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
@@ -71,8 +88,24 @@ func main() {
 	// runs, reports no error and does nothing: PocketBase registers `serve`
 	// inside Start(), so the lookup fails here and the `if` quietly skips.
 	// The flag was documented and unusable, which is worse than absent.
-	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce", false,
+	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce",
+		settings.NoAnnounce,
 		"do not advertise this server on the local network")
+
+	// Registered so cobra accepts it; the value was read before cobra existed,
+	// by configPath, because the file has to be found before the flags it
+	// supplies defaults for are parsed.
+	app.RootCmd.PersistentFlags().String("config", "",
+		"path to the JSON config file (default: "+configName+" beside --dir)")
+
+	// The bind address out of the file or the environment, as a default rather
+	// than an override: --http is PocketBase's own flag and is added to
+	// `serve` inside Start(), so there is nowhere to set its default from
+	// here. Appending is the same thing done earlier — an explicit --http is
+	// already in argv, wins, and this does not run.
+	if settings.HTTP != "" && isServe(os.Args) && !hasArg(os.Args, "--http") {
+		os.Args = append(os.Args, "--http="+settings.HTTP)
+	}
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
@@ -90,6 +123,29 @@ func main() {
 // explicit --dir still wins over this, so this only decides what a bare
 // `serve` does. An empty string leaves PocketBase's own default alone rather
 // than inventing a directory out of a failure.
+// Whether this invocation is the one that listens. `--http` belongs to
+// `serve` alone, and handing it to `first-device` is an unknown-flag error.
+func isServe(args []string) bool {
+	skip := false
+	for _, arg := range args[1:] {
+		if skip {
+			skip = false
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			// `--dir /data serve` puts the value where the subcommand would
+			// be. Only the flags that take one, and only in the separated
+			// spelling — `--dir=/data` carries its own value.
+			skip = !strings.Contains(arg, "=") &&
+				(arg == "--dir" || arg == "--config" || arg == "--http" ||
+					arg == "--encryptionEnv")
+			continue
+		}
+		return arg == "serve"
+	}
+	return false
+}
+
 func defaultDataDir() string {
 	base, err := os.UserConfigDir()
 	if err != nil {

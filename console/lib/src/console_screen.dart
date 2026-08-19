@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'addresses.dart';
+import 'config.dart';
 import 'console_view.dart';
 import 'pairing_dialogs.dart';
 import 'server.dart';
@@ -173,14 +174,28 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   }
 
   /// Rebinding is a restart, because a listening socket cannot be moved. The
-  /// unit is rewritten too when there is one — otherwise the address changes
-  /// here and comes back the old one at the next login, with nothing said.
+  /// address is written to the config file, and to the unit as well when there
+  /// is one — otherwise the address changes here and comes back the old one at
+  /// the next login, with nothing said.
+  ///
+  /// Both, not one: a unit and a config that disagree are worse than either,
+  /// because which of them wins depends on how the server was started that
+  /// day. The unit passes --http, which beats the file, so writing the file
+  /// alone would leave the service on the old address; writing the unit alone
+  /// would lose the address for every launch that is not the service.
+  ///
+  /// The metrics token is deliberately *not* written here. The console mints
+  /// one per window for its own status pane, and a per-window secret in a file
+  /// on disk is a credential outliving the reason it existed — an operator who
+  /// wants a scraper sets `metrics_token` themselves, and that one this
+  /// console reads and never prints beside the address.
   Future<void> _rebind(String next) async {
     if (next == _server.addr) return;
     try {
       final wasRunning = await _server.running;
       await _server.stop();
       _server.addr = next;
+      saveConfig(widget.dir, {'http': next});
       if (serviceInstalled()) {
         await installService(_serviceConfig(addr: next));
       } else if (wasRunning) {

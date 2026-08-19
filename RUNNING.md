@@ -9,6 +9,7 @@ Building any of them is [BUILD.md](BUILD.md).
 
 - [The first device, and every one after it](#the-first-device-and-every-one-after-it)
 - [Command line](#command-line)
+- [Configuration](#configuration)
 - [The desktop console](#the-desktop-console)
 - [Docker](#docker)
 - [Leaving it running](#leaving-it-running)
@@ -69,6 +70,60 @@ localhost by default, because this server speaks plain HTTP and holds
 everybody's ciphertext — a public interface means device tokens crossing the
 network in the clear. `SYNC_ADDR` and `SYNC_DIR` are what `run.sh` reads.
 
+## Configuration
+
+Every option is a flag, an environment variable and a key in one JSON file, and
+they win in that order:
+
+**command-line flag → environment variable → config file → default.**
+
+That order is the one people expect, and it is the one that keeps every
+existing deployment working: `docker compose` and the systemd unit both pass
+environment, so neither has to learn about a file to keep doing what it does.
+A server with no config file behaves exactly as it did before there was one.
+
+| flag | environment | key | what it is |
+|---|---|---|---|
+| `--http` | `SUMMAREADER_HTTP` | `http` | host:port to bind |
+| `--dir` | `SUMMAREADER_DIR` | `dir` | where the database lives |
+| — | `SUMMAREADER_METRICS_TOKEN` | `metrics_token` | the credential `/metrics` wants; empty means the endpoint is off |
+| `--no-announce` | `SUMMAREADER_NO_ANNOUNCE` | `no_announce` | do not advertise on the local network |
+| `--config` | `SUMMAREADER_CONFIG` | — | where the file itself is |
+
+The file lives **inside the data directory**, as `summareader-sync.json`, so
+one directory is the whole installation: the database and the settings that
+decide where it is served, backed up together and moved together.
+[`summareader-sync.example.json`](summareader-sync.example.json) is a copy to
+start from — every key with a note above it saying what it is for.
+
+Which means `dir` in the file is a little circular: the file is looked for
+inside the data directory, so the directory has to be settled *before* the file
+is read, from the flag, the environment or the built-in default only. A `dir`
+key still works — it is read from the default location and then moves the
+database — but `--dir` or `SUMMAREADER_DIR` is what you want unless you know
+why you want the other. `--config` names the file outright and skips all of it.
+
+A file that exists and does not parse **stops the server**, with the parse
+error and the path. A config somebody wrote and the server quietly ignored is
+the bug that takes an afternoon to find; a server that will not start says so
+in the first line of the log.
+
+**The console writes this file.** Changing the address or port in the window
+writes `http` back, which is the whole reason the file exists — before it,
+settings changed in that window were gone as soon as it closed. Only the keys
+that changed are written; everything else in the file is kept, including keys
+this version has never heard of, so a comment or a newer server's setting
+survives a port change. The write is a temporary file and a rename, and a
+malformed existing file is refused rather than replaced.
+
+**The metrics token is deliberately not written by the console.** The console
+mints one per window for its own status pane and hands it to the server it
+starts; persisting that would turn a secret that exists for the life of a
+window into a credential on disk outliving the reason for it. An operator who
+wants a scraper sets `metrics_token` themselves — and that one the console
+reads and uses, and never shows next to the address in the window, where the
+address is meant to be copied and the token is not.
+
 ## The desktop console
 
 ```sh
@@ -90,7 +145,8 @@ The console is a Flutter desktop app, a separate program from the server rather
 than a window inside it — [BUILD.md](BUILD.md) says why, and how it finds the
 server binary to run.
 
-`--http` and `--dir` work here too, spelled as the server spells them; without
+`--http` and `--dir` work here too, spelled as the server spells them, and so
+does the [config file](#configuration) and the same precedence — without any of
 them it opens on `127.0.0.1:8099` and `~/.config/summareader-sync`. If a
 service is already installed, it opens on *that* service's address instead,
 because that is where the server actually is.
@@ -104,7 +160,7 @@ What it shows and what each control does:
 | **status line** | whether the server is up, on which address, and — when a unit is installed — that systemd is the one running it. Also when there is no server binary to be found, which is the one failure that would otherwise look like a button that does nothing |
 | **counts** | devices, log entries and what the database weighs |
 | **the device list** | every device paired with this server: what it is called, when it was last heard from, and how many entries it has sent. Revoked devices stay on the list and say so — a device someone stopped is one they should still be able to see — and so does a device that has sent nothing, which is either brand new or not getting through |
-| **Address** | the bind address and port. Loopback and `0.0.0.0` are offered first because they are the two *decisions*; after them, every address this machine actually answers on, labelled with its interface. Changing either restarts the server, and rewrites the unit when there is one |
+| **Address** | the bind address and port. Loopback and `0.0.0.0` are offered first because they are the two *decisions*; after them, every address this machine actually answers on, labelled with its interface. Changing either restarts the server, writes the [config file](#configuration), and rewrites the unit when there is one — both, because a unit and a config that disagree are worse than either |
 | **Data directory** | where the database is. Set with `--dir` at launch; not editable here |
 | **Start at login** | writes `~/.config/systemd/user/summareader-sync.service` and enables it, so the server comes back after a reboot without the console. Unchecking removes it again. Linux only — the row is absent elsewhere |
 | **running** | what that unit runs: this binary, or `docker compose`. The container choice appears only when there is a `docker-compose.yml` next to the binary or beside the data directory |
@@ -166,7 +222,10 @@ mount the container cannot write reports `attempt to write a readonly
 database`, which is a permission error wearing a misleading sentence.
 
 `SUMMAREADER_METRICS_TOKEN` is passed through when set, which is how the
-console reads the counts out of a container it started.
+console reads the counts out of a container it started. The container reads the
+same [config file](#configuration) as everything else — it is in `/data`, which
+is `./pb_data` — but the compose file passes `--http` and `--dir` on the command
+line, so those two are the image's and not the file's.
 
 Losing `pb_data` does not lose anybody's library — those live on the devices —
 but it does lose every device's token and the account they share, so every
@@ -298,8 +357,9 @@ describes the contents of an entry, for the same reason nothing in `/metrics`
 does: the server cannot read one.
 
 `GET /metrics` answers in the Prometheus text format when
-`SUMMAREADER_METRICS_TOKEN` is set, and 404s when it is not. The scraper sends
-it as a bearer token.
+`SUMMAREADER_METRICS_TOKEN` — or `metrics_token` in the
+[config file](#configuration) — is set, and 404s when it is not. The scraper
+sends it as a bearer token.
 
 ```sh
 SUMMAREADER_METRICS_TOKEN=$(openssl rand -hex 24) ./summareader-sync serve

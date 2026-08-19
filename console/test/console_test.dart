@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
+import 'package:summareader_sync_console/src/config.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
 import 'package:summareader_sync_console/src/format.dart';
 import 'package:summareader_sync_console/src/pairing.dart';
@@ -287,5 +288,47 @@ void main() {
     expect(state.statusLine, 'Running on http://127.0.0.1:8099');
     expect(state.paired.first.label, isEmpty);
     expect(state.countsLine, '0 devices · 0 entries · 0.0 MB');
+  });
+
+  // The complaint this file exists for: the address is changed in the window,
+  // the window is closed, and it is back to the default. It has to survive.
+  group('the config file', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('console-config'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('a rebind written here comes back on the next open', () {
+      saveConfig(dir.path, {'http': '10.10.20.1:9000'});
+      expect(configBind(dir.path), '10.10.20.1:9000');
+    });
+
+    test('nothing configured is not an error, just nothing', () {
+      expect(configBind(dir.path), isEmpty);
+    });
+
+    test('keys this version does not know are kept', () {
+      File(configPath(dir.path)).writeAsStringSync(
+        '{"_comment":"hands off","http":"old:1","future":42}',
+      );
+      saveConfig(dir.path, {'http': 'new:2'});
+
+      final values = readConfig(dir.path);
+      expect(values['_comment'], 'hands off');
+      expect(values['future'], 42);
+      expect(values['http'], 'new:2');
+    });
+
+    test('a malformed file is refused, not overwritten', () {
+      const broken = '{"http": "1.2.3.4:1",}';
+      final file = File(configPath(dir.path))..writeAsStringSync(broken);
+
+      expect(() => saveConfig(dir.path, {'http': 'new:2'}), throwsException);
+      expect(file.readAsStringSync(), broken);
+    });
+
+    test('the metrics token is never written by a rebind', () {
+      saveConfig(dir.path, {'http': 'a:1'});
+      expect(readConfig(dir.path).containsKey('metrics_token'), isFalse);
+    });
   });
 }
