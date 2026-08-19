@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -322,5 +323,72 @@ func TestRevokedDeviceResolvesToNothing(t *testing.T) {
 	}
 	if _, _, err := accountForToken(app, "made-up"); err == nil {
 		t.Fatal("unknown token resolved")
+	}
+}
+
+// A batch is one commit, and the sequence numbers it hands out have to be
+// indistinguishable from the ones a run of single appends would have given —
+// the reader's gap-free guarantee does not know which endpoint was used.
+func TestBatchIsGapFreeAndContinuesTheCounter(t *testing.T) {
+	app, account := newTestApp(t)
+
+	if _, err := appendEntry(app, account, "device-1", "first"); err != nil {
+		t.Fatal(err)
+	}
+
+	payloads := make([]string, 50)
+	for i := range payloads {
+		payloads[i] = fmt.Sprintf("batched %d", i)
+	}
+	last, err := appendBatch(app, account, "device-1", payloads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last != 51 {
+		t.Fatalf("last seq = %d, want 51", last)
+	}
+
+	// And a single append afterwards carries on from there.
+	next, err := appendEntry(app, account, "device-1", "after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != 52 {
+		t.Fatalf("seq after batch = %d, want 52", next)
+	}
+
+	entries, err := readFrom(app, account, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 52 {
+		t.Fatalf("read back %d entries, want 52", len(entries))
+	}
+	for i, entry := range entries {
+		if entry.Seq != int64(i+1) {
+			t.Fatalf("entry %d has seq %d — the log has a gap", i, entry.Seq)
+		}
+	}
+}
+
+// All or nothing. The client marks records sent only after the call returns,
+// so a batch that half-wrote would lose exactly the records it did not write.
+func TestBatchOverTheLimitWritesNothing(t *testing.T) {
+	app, account := newTestApp(t)
+
+	payloads := make([]string, maxBatch+1)
+	for i := range payloads {
+		payloads[i] = "x"
+	}
+	if _, err := appendBatch(app, account, "device-1", payloads); !errors.Is(err, ErrBatchTooLarge) {
+		t.Fatalf("err = %v, want ErrBatchTooLarge", err)
+	}
+
+	entries, err := readFrom(app, account, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("wrote %d entries after a refused batch, want 0", len(entries))
 	}
 }

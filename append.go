@@ -11,6 +11,9 @@ import (
 // ErrNoAccount is returned when the token does not resolve.
 var ErrNoAccount = errors.New("unknown or revoked device")
 
+// ErrBatchTooLarge is returned when a batch asks for more than maxBatch.
+var ErrBatchTooLarge = errors.New("batch too large")
+
 // appendEntry writes one log entry and returns its sequence number.
 //
 // # Why this is a Go hook and not a collection rule
@@ -74,6 +77,85 @@ func appendEntry(app core.App, accountID, deviceID, payload string) (int64, erro
 		return 0, err
 	}
 	return seq, nil
+}
+
+// maxBatch is how many entries one request may carry.
+//
+// A ceiling, not a tuning knob: the whole batch is held in memory, encoded in
+// one JSON body and written in one transaction that blocks every other
+// writer for the account. 500 sealed records is a few megabytes and a few
+// milliseconds; a client asking to send its entire library in one request
+// would be a long write lock and an easy way to exhaust memory from outside.
+const maxBatch = 500
+
+// appendBatch writes many entries in one transaction and returns the last
+// sequence number.
+//
+// All or nothing, and that is the point. The client marks records as sent
+// only after the call returns, so a partial write would leave it believing
+// records went that did not — or resending ones that did, which the log
+// cannot deduplicate. One transaction also means one commit rather than one
+// per record.
+//
+// The counter is bumped once for the whole batch rather than per entry: the
+// gap-free guarantee comes from the counter and the insert becoming visible
+// at the same commit, and a batch is one commit.
+func appendBatch(app core.App, accountID, deviceID string, payloads []string) (int64, error) {
+	if len(payloads) == 0 {
+		return 0, errors.New("nothing to append")
+	}
+	if len(payloads) > maxBatch {
+		return 0, ErrBatchTooLarge
+	}
+
+	var last int64
+
+	err := app.RunInTransaction(func(tx core.App) error {
+		account, err := tx.FindRecordById(collAccounts, accountID)
+		if err != nil {
+			return fmt.Errorf("account: %w", err)
+		}
+
+		// Charged for the whole batch at once, so a batch cannot slip past a
+		// ceiling that each of its records individually would have hit.
+		size := 0
+		for _, payload := range payloads {
+			size += len(payload)
+		}
+		if err := checkQuota(tx, accountID, size); err != nil {
+			return err
+		}
+
+		collection, err := tx.FindCollectionByNameOrId(collEntries)
+		if err != nil {
+			return err
+		}
+
+		seq := int64(account.GetInt("seq"))
+		for _, payload := range payloads {
+			seq++
+			entry := core.NewRecord(collection)
+			entry.Set("account", accountID)
+			entry.Set("seq", seq)
+			entry.Set("payload", payload)
+			entry.Set("device", deviceID)
+			if err := tx.Save(entry); err != nil {
+				return err
+			}
+		}
+
+		account.Set("seq", seq)
+		if err := tx.Save(account); err != nil {
+			return fmt.Errorf("counter: %w", err)
+		}
+		last = seq
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+	return last, nil
 }
 
 // LogEntry is what a reader gets back. Deliberately four fields: anything more

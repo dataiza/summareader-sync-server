@@ -8,276 +8,49 @@ stores opaque ciphertext against sequence numbers and never learns what any of
 it means. It cannot search, cannot count unread, and cannot render a web
 reader, because it holds no keys.
 
-## Running it
-
-Three ways into the same server: the headless binary, a desktop window that
-supervises that binary, or a container. All three serve the same `pb_data`, so
-the choice is about how you like to start things, not about which server you
-end up with.
-
-### Headless — the binary
+## Start here
 
 ```sh
-./scripts/run.sh                  # builds, then serves ./pb_data in the foreground
-```
-
-```sh
-go build -o summareader-sync .
-
-# Create an account and issue a token for your first device. This has to happen
-# from a shell, because until one device has a token there is nobody to
-# authorise the request.
+./scripts/run.sh                                    # build and serve, foreground
 ./summareader-sync first-device "My library" "Desktop" --dir=./pb_data
-
-./summareader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
 ```
 
-`first-device` prints the token once. Paste it into SummaReader on that device. Add
-`--json` for scripting.
+The second command prints a token once. Paste it into SummaReader on that
+device; **every device after the first joins from one that is already paired**,
+by scanning that app's pairing code — not from here. That code carries the key
+that makes the library readable, and this server has never held it.
 
-**Every device after the first is enrolled from one that is already paired** —
-no shell access needed:
+Prefer a window, or a container?
 
 ```sh
-curl -X POST http://127.0.0.1:8099/enroll \
-  -H "Authorization: Bearer <existing-token>" \
-  -d '{"label":"Phone"}'
+./scripts/build.sh --desktop && ./dist/summareader-sync-gui-linux-amd64 gui
+./scripts/run.sh --docker
 ```
 
-The QR a user scans during pairing carries the *master key*, which is what makes
-the library readable. The new device still needs its own *server* token, and
-that is what enrol issues. Separate tokens are what make revoking one device
-possible at all.
+## Documentation
 
-**This build needs no C compiler, and that is what makes it easy to run
-anywhere.** `CGO_ENABLED=0` cross-compiles it from one machine to linux/amd64,
-windows/amd64 and both macOS architectures — around 24–25 MB each with the
-debug information stripped, 33–34 MB as `go build` leaves it. One machine
-builds every download, and whoever runs it installs nothing first.
-
-```sh
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" \
-  -o summareader-sync-darwin-arm64 .
-```
-
-`scripts/build.sh` does all of them at once, into `dist/` — five headless
-binaries and the desktop one for whichever machine runs it:
-
-```sh
-./scripts/build.sh              # every version there is
-./scripts/build.sh --headless   # only the portable ones
-./scripts/build.sh --desktop    # only the window, for this machine
-```
-
-#### Leaving it running
-
-```sh
-./scripts/install.sh              # builds it, installs a systemd user service
-./scripts/install.sh --uninstall  # reversed; the database is kept
-```
-
-A *user* service, under `~/.config/systemd/user`: this holds one person's
-ciphertext on one person's machine, and a unit there needs no root to install,
-inspect or remove. `scripts/summareader-sync.service` is the definition the
-installer fills in — edit that rather than the installed copy. For a shared
-box, copy it to `/etc/systemd/system`, give it a `User=` and drop the `--user`
-flags.
-
-```sh
-systemctl --user status summareader-sync
-journalctl --user -u summareader-sync -f
-sudo loginctl enable-linger "$USER"    # or it stops when you log out
-```
-
-### Desktop — a window
-
-```sh
-./scripts/build.sh --desktop                   # or: go build -tags gui .
-./dist/summareader-sync-gui-linux-amd64 gui --http=127.0.0.1:8099
-                                               # --dir too, or it uses
-                                               # ~/.config/summareader-sync
-```
-
-Note the name: a binary built without the tag is the headless one, and asking
-it for `gui` prints how to build the other rather than opening anything. That
-is the trade working as intended, but it does mean an old binary lying around
-answers the same way — build into `dist/` and run it from there.
-
-![The desktop window: status, counts, and the three buttons](docs/desktop-window.png)
-
-It shows whether the server is up and what it holds, starts and stops it, opens
-PocketBase's dashboard, and issues a first device's token — which is the one job that
-otherwise needs a terminal. Nothing else: the dashboard is the real admin
-interface and this does not reimplement any of it.
-
-**The window supervises the server as a child process rather than embedding
-it.** It runs the same argv the systemd unit runs, so the desktop path and the
-service path cannot drift into two different servers, and the server's own
-`log.Fatal` cannot take the window down with it. The counts come from the
-child's `/metrics`, with a token minted per window, rather than from a second
-connection to the SQLite file the child is writing.
-
-**This build needs cgo**, because the toolkit does, which means a C toolchain
-on each platform you want a window for — the exact thing the headless build
-avoids. It is also 52 MB against the headless build's 33 MB. That is the
-trade the `gui` tag exists to keep optional: `go build .` is untouched and
-still cross-compiles, and a build without the tag answers `gui` with a sentence
-saying which download this is.
-
-Honest about the state: **the desktop build has been run on Linux only.**
-Nothing produces the Windows and macOS builds yet — no workflow, no release.
-The code has no platform-specific parts and the toolkit supports all three, but
-neither of those is the same as having run it.
-
-`docs/desktop-window.png` is drawn by `go test -tags gui`, not photographed:
-the software painter renders the same widget tree without a display, so the
-picture is regenerated whenever the window changes rather than aging quietly.
-
-### Container — Docker
-
-```sh
-./scripts/run.sh --docker         # same, in a container — needs no Go toolchain
-./scripts/install.sh --docker     # or leaves it running, restarted after a reboot
-```
-
-```sh
-docker compose up -d
-docker compose exec sync summareader-sync first-device "My library" "Desktop" --dir=/data
-```
-
-The second command prints a token once, as it does outside Docker, and every
-device after the first enrols from one already paired.
-
-The Docker path installs no systemd unit: `restart: unless-stopped` and an
-enabled `docker.service` already bring the container back after a reboot, and a
-unit beside compose is a second thing to keep in step.
-
-It serves the database that is already here. `pb_data` holds the account and
-every device token, so `docker-compose.override.yml` bind-mounts it rather than
-letting the container start on an empty volume — a server that answers
-perfectly well and knows none of your devices. The override also sets
-`user: "1000:1000"`, because the image runs as uid 10001 and a bind mount it
-cannot write reports `attempt to write a readonly database`, which is a
-permission error wearing a misleading sentence. Change that uid to yours, or
-delete the file to go back to the named volume.
-
-Compose offers the port on `127.0.0.1` and on one named address — set
-`SYNC_BIND` to the one other devices reach this machine by, or delete that
-line for a machine that syncs only with itself. This server speaks plain HTTP
-and holds everyone's ciphertext, so anywhere less private than a network you
-control wants a TLS terminator in front of it exposed instead.
-
-Everything worth keeping is in `./pb_data`, which is the same directory the
-server uses when run without Docker, so the two are one deployment rather than
-two. Set `SYNC_UID`/`SYNC_GID` if that directory is not owned by you. Losing it does not lose
-anybody's library — those live on the devices — but it does lose every
-device's token and the account they share, so each device would have to be
-paired again.
-
-#### Checking a deployment
-
-```sh
-./scripts/smoke.sh          # build, start, exercise the contract
-./scripts/smoke.sh --clean  # and remove the container and its volume
-```
-
-Twelve checks: that the image builds and starts, that all five operations
-answer, that an unauthenticated request is refused, that a second device can
-enrol without a shell, that listed devices do not carry their tokens, and that
-the log and the blobs survive a restart. The unit tests cover the handlers;
-this covers everything around them that can be broken while every test passes.
-
-## Finding it on a local network
-
-The server advertises itself over mDNS as `_summareader-sync._tcp`, so a client
-on the same network can offer it rather than asking somebody to read an IP
-address off a router. `serve --no-announce` turns it off, for networks that
-would rather nothing multicast and for hosted instances that have no reason to
-shout on whatever network they sit in.
-
-**Two things it does not survive, both worth knowing before relying on it.**
-
-Docker's default bridge network does not carry multicast to the LAN, so a
-container started by the compose file here is not discoverable. That needs
-`network_mode: host`, which also gives up the port mapping — a deliberate
-trade, not an oversight.
-
-And on a host already running a responder of its own, discovery is uneven:
-verified working between processes with avahi-daemon running, and `avahi-browse`
-on that same host still does not list it. A client on another machine is the
-case that matters and is the case least affected, but this is a convenience
-that can fail quietly, which is why the address always works and nothing
-depends on this.
-
-## Administration
-
-PocketBase's own dashboard is at `/_/`, and it is where backups, restores and
-raw inspection live. Create a superuser to reach it:
-
-```sh
-docker compose exec sync summareader-sync superuser create you@example.com
-```
-
-**What an admin interface here can and cannot do is decided by the encryption,
-not by effort.** The server holds opaque ciphertext and no keys. So it can:
-
-- list, enrol and revoke devices, and see when each last synced
-- back up and restore the whole store
-- delete an account's data outright, which is what `/wipe` is
-- report how much space an account is using
-
-And it cannot, ever:
-
-- delete a feed, or show you one — it does not know what a feed is
-- apply retention by content, age of an article, or read state
-- search anything
-
-Those belong in the app, which has the keys. An admin screen offering them
-would either be lying or would mean giving the server the keys, which is the
-one thing this design exists to avoid.
-
-A backup taken here is safe to keep anywhere, and **useless without the
-recovery code** — it is ciphertext. That is a feature, and it is also the
-thing to remember before relying on the backup as your only copy.
-
-## Ceilings, if you are hosting for somebody else
-
-Both of these are **off**, and stay off unless you set a number. If you self-host,
-the disk is yours and you can already see it — there is nothing here for you.
-They exist for the case where somebody else's growth is your bill.
-
-**Storage.** Each account has a `quota_bytes` field, editable in the dashboard.
-Zero means no ceiling. Set it and the account is refused an append or a new
-blob once its stored payload would exceed it — answered as `507` with a
-sentence the app shows the person, not a status code they can do nothing with.
-
-Usage is summed at the check rather than kept in a counter column, so it cannot
-drift out of step with wipes and deletions. Payload bytes only: row overhead
-and indexes are real disk too, but a ceiling somebody can reason about is worth
-more than one that is exactly right.
-
-**Request rate.** PocketBase ships its own rate limiter, disabled by default,
-under Settings → Rate limits in the dashboard. Rules match by path prefix, so
-`/append` and `/blob` can be limited without any code here. It is per-client,
-not per-account, which is the right shape for abuse and the wrong shape for
-billing — if you ever need a ceiling per paying account, that is a different
-mechanism and this is not it.
-
-**Neither of these prunes anything.** The log is append-only: read state and
-highlights append to it forever, so an account grows with use, not with the
-size of the library. A quota over a log nothing prunes is a ceiling an active
-account eventually reaches whatever it stores, and today the only remedy the
-server can offer is a wipe.
+| | |
+|---|---|
+| [BUILD.md](BUILD.md) | building it — headless, desktop, cross-compiling, tests |
+| [RUNNING.md](RUNNING.md) | running it — command line, desktop window, Docker, leaving it running, administration |
+| below | why it is shaped like this |
 
 ## The five operations, frozen
 
 ```
 POST /append          -> {"seq": n}
+POST /append-batch    -> {"seq": n, "count": k}   # up to 500, one transaction
 GET  /from/{seq}      -> {"entries": [...]}   entries strictly after seq
 PUT  /blob/{name}     content-addressed, idempotent
 GET  /blob/{name}
 GET  /subscribe       -> {"head": n}          a change hint, no payload
 ```
+
+`/append-batch` is the same operation many at a time, not a sixth: optional,
+all-or-nothing, and answered with 404 by a server that predates it, which the
+client takes as "send them one at a time". It exists because the work per
+record is 0.35 ms and the round-trip to reach it is twenty or more, so a first
+sync of a real library was almost entirely waiting.
 
 Plus `GET /instance`, which is not part of the contract. It exists so a client
 can tell "different server" from "same server, no data" — without it, pointing
@@ -353,29 +126,3 @@ Dropping a device's token stops it syncing. Whatever it already downloaded
 stays readable, because it still holds its own copy of the master key. There is
 no key rotation and no re-encryption pass — those would mean re-encrypting the
 whole library. The client copy says exactly this and no more.
-
-## Version pinning
-
-PocketBase is pre-1.0 with no compatibility guarantee, so the version in
-`go.mod` is exact. Upgrade deliberately and re-run the tests; the collection
-API in particular changes between minor versions.
-
-## Metrics
-
-`GET /metrics` answers in the Prometheus text format when
-`SUMMAREADER_METRICS_TOKEN` is set, and 404s when it is not. The scraper sends
-it as a bearer token.
-
-```sh
-SUMMAREADER_METRICS_TOKEN=$(openssl rand -hex 24) ./summareader-sync serve
-```
-
-Accounts, devices, log entries, blobs, bytes held — in total and per account,
-because "the server is full" is never the useful form of that question. Plus
-memory, goroutines and uptime.
-
-**A monitoring system does not get a device token.** One credential that can
-both scrape and read the log is a monitoring system that has the library, so
-this is its own secret. Everything reported is a count, a byte total or an age:
-the server holds ciphertext and cannot read an entry, and a test asserts that
-no payload ever appears in the output.

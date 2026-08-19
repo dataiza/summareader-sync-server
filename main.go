@@ -118,6 +118,11 @@ func defaultDataDir() string {
 // already decrypted.
 func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/append", handleAppend)
+	// The same operation, many at a time. A first sync is thousands of
+	// records and one POST each was the whole of its cost: the work per
+	// record is a third of a millisecond, the round-trip to reach it is
+	// twenty or more.
+	e.Router.POST("/append-batch", handleAppendBatch)
 	e.Router.GET("/from/{seq}", handleReadFrom)
 	e.Router.PUT("/blob/{name}", handlePutBlob)
 	e.Router.GET("/blob/{name}", handleGetBlob)
@@ -215,6 +220,68 @@ func handleAppend(e *core.RequestEvent) error {
 	}
 
 	return e.JSON(http.StatusOK, appendResponse{Seq: seq})
+}
+
+type appendBatchRequest struct {
+	Payloads []string `json:"payloads"`
+}
+
+// The last sequence number, and how many were written.
+//
+// The client needs the count to know the batch was taken whole: seq alone
+// cannot distinguish "all 200 written" from a server that wrote fewer.
+type appendBatchResponse struct {
+	Seq   int64 `json:"seq"`
+	Count int   `json:"count"`
+}
+
+func handleAppendBatch(e *core.RequestEvent) error {
+	accountID, deviceID, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body appendBatchRequest
+	if err := e.BindBody(&body); err != nil || len(body.Payloads) == 0 {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "payloads required",
+		})
+	}
+	for _, payload := range body.Payloads {
+		if payload == "" {
+			return e.JSON(http.StatusBadRequest, map[string]string{
+				"error": "empty payload in batch",
+			})
+		}
+	}
+
+	seq, err := appendBatch(e.App, accountID, deviceID, body.Payloads)
+	if err != nil {
+		if errors.Is(err, ErrBatchTooLarge) {
+			return e.JSON(http.StatusRequestEntityTooLarge, map[string]any{
+				"error": "batch too large",
+				"max":   maxBatch,
+			})
+		}
+		if errors.Is(err, ErrNoAccount) {
+			return e.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "unknown account",
+			})
+		}
+		if errors.Is(err, ErrQuotaExceeded) {
+			return e.JSON(http.StatusInsufficientStorage, quotaError)
+		}
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "append failed",
+		})
+	}
+
+	return e.JSON(http.StatusOK, appendBatchResponse{
+		Seq:   seq,
+		Count: len(body.Payloads),
+	})
 }
 
 type readResponse struct {

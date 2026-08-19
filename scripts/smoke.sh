@@ -63,6 +63,17 @@ expect "append returns a sequence number" \
 expect "and the next one moves it on" \
   "$(curl -fsS -X POST "$base/append" "${auth[@]}" -d '{"payload":"two"}')" \
   '"seq":2'
+# The endpoint a first sync lives on. In the image as well as in the tests:
+# a route registered only in a build nobody ships is a route that does not
+# exist.
+expect "append-batch takes several at once" \
+  "$(curl -fsS -X POST "$base/append-batch" "${auth[@]}" \
+      -d '{"payloads":["three","four","five"]}')" \
+  '"seq":5'
+expect "and says how many it took" \
+  "$(curl -fsS -X POST "$base/append-batch" "${auth[@]}" \
+      -d '{"payloads":["six"]}')" \
+  '"count":1'
 expect "readFrom returns what was appended" \
   "$(curl -fsS "$base/from/0" "${auth[@]}")" '"payload":"one"'
 expect "putBlob accepts a blob" \
