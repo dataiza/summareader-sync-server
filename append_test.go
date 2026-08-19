@@ -392,3 +392,49 @@ func TestBatchOverTheLimitWritesNothing(t *testing.T) {
 		t.Fatalf("wrote %d entries after a refused batch, want 0", len(entries))
 	}
 }
+
+// The head is what exists, not what the counter is up to.
+//
+// Deleting entries out of band — a superuser in the dashboard, a restore from
+// before they were written — used to leave the head at the counter's value.
+// Every client then concluded the log was intact and that everything it held
+// had already been sent, and reported a successful sync that moved nothing.
+func TestHeadFollowsTheEntriesAndNotTheCounter(t *testing.T) {
+	app, account := newTestApp(t)
+
+	for i := 0; i < 5; i++ {
+		if _, err := appendEntry(app, account, "device-1", "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head, err := headSeq(app, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head != 5 {
+		t.Fatalf("head = %d, want 5", head)
+	}
+
+	// Rows removed behind the server's back, exactly as the console does it.
+	if _, err := app.DB().NewQuery("DELETE FROM " + collEntries).Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	head, err = headSeq(app, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head != 0 {
+		t.Fatalf("head after the log was emptied = %d, want 0", head)
+	}
+
+	// And the counter is untouched, so new entries still get fresh numbers
+	// rather than reusing ones a client may have seen.
+	seq, err := appendEntry(app, account, "device-1", "after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 6 {
+		t.Fatalf("seq after the log was emptied = %d, want 6", seq)
+	}
+}

@@ -377,7 +377,7 @@ func handleSubscribe(e *core.RequestEvent) error {
 		})
 	}
 
-	account, err := e.App.FindRecordById(collAccounts, accountID)
+	head, err := headSeq(e.App, accountID)
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "unavailable",
@@ -392,7 +392,7 @@ func handleSubscribe(e *core.RequestEvent) error {
 	// on resume, and a socket is a reconnection state machine to maintain for
 	// a message that says "poll now".
 	return e.JSON(http.StatusOK, map[string]any{
-		"head":    account.GetInt("seq"),
+		"head":    head,
 		"receipt": receipt,
 	})
 }

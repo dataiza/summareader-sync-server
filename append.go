@@ -197,6 +197,32 @@ func readFrom(app core.App, accountID string, after int64, limit int) ([]LogEntr
 	return entries, nil
 }
 
+// headSeq is the highest entry that actually exists, or 0 for an empty log.
+//
+// Not the account counter, which is what this used to report. The counter is
+// the *next* number to hand out and it never goes down — so a log emptied
+// out of band (a superuser deleting rows, a restore from before the entries
+// existed) still announced a head of 1426, and every client concluded there
+// was nothing new and that everything it held had already been sent. Sync
+// completed instantly and moved nothing, which is the worst way to be wrong.
+//
+// The counter stays the source of new sequence numbers. This is only the
+// answer to "what is there", and those are different questions.
+func headSeq(app core.App, accountID string) (int64, error) {
+	var result struct {
+		Head int64 `db:"head"`
+	}
+	err := app.DB().
+		Select("COALESCE(MAX(seq), 0) AS head").
+		From(collEntries).
+		Where(dbx.HashExp{"account": accountID}).
+		One(&result)
+	if err != nil {
+		return 0, err
+	}
+	return result.Head, nil
+}
+
 // putBlob stores content-addressed bytes. Idempotent: the name is derived from
 // the content, so re-uploading is a no-op rather than a duplicate.
 func putBlob(app core.App, accountID, name, payload string) error {
