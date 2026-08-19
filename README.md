@@ -23,7 +23,7 @@ that makes the library readable, and this server has never held it.
 Prefer a window, or a container?
 
 ```sh
-cd console && flutter run -d linux    # the desktop console, in front of the server
+./scripts/run.sh gui                  # the desktop console, in front of the server
 ./scripts/run.sh --docker
 ```
 

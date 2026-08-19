@@ -72,9 +72,19 @@ network in the clear. `SYNC_ADDR` and `SYNC_DIR` are what `run.sh` reads.
 ## The desktop console
 
 ```sh
+./scripts/run.sh gui                  # the short way, from a checkout
 cd console && flutter run -d linux    # from source
 ./scripts/build.sh --console          # or built, into console/build/
 ```
+
+`run.sh gui` is a convenience rather than a subcommand — the console is a
+separate program, and the server binary has no `gui` in it any more. It runs
+the release build when one exists and falls back to `flutter run` when it does
+not; it builds the server first if Go is here, so Start has something to
+start; and it passes on the same `SYNC_ADDR` and `SYNC_DIR` the other `run.sh`
+commands use. That last part is the point: a console opening
+`~/.config/summareader-sync` while `run.sh` serves `./pb_data` would report an
+empty server and be right about the wrong database.
 
 The console is a Flutter desktop app, a separate program from the server rather
 than a window inside it — [BUILD.md](BUILD.md) says why, and how it finds the
