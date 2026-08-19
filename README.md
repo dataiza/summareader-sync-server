@@ -23,7 +23,7 @@ that makes the library readable, and this server has never held it.
 Prefer a window, or a container?
 
 ```sh
-./scripts/build.sh --desktop && ./dist/summareader-sync-gui-linux-amd64 gui
+cd console && flutter run -d linux    # the desktop console, in front of the server
 ./scripts/run.sh --docker
 ```
 
@@ -31,8 +31,8 @@ Prefer a window, or a container?
 
 | | |
 |---|---|
-| [BUILD.md](BUILD.md) | building it — headless, desktop, cross-compiling, tests |
-| [RUNNING.md](RUNNING.md) | running it — command line, desktop window, Docker, leaving it running, administration |
+| [BUILD.md](BUILD.md) | building it — the server, the console, cross-compiling, tests |
+| [RUNNING.md](RUNNING.md) | running it — command line, the console, Docker, leaving it running, administration |
 | below | why it is shaped like this |
 
 ## The five operations, frozen

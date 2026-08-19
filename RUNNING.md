@@ -1,15 +1,15 @@
 # Running it
 
-Three ways into the same server: the headless binary, a desktop window that
-supervises that binary, or a container. All three serve the same `pb_data`, so
-the choice is about how you like to start things, not about which server you
-end up with.
+Three ways into the same server: the binary in a terminal, a desktop console
+that supervises that binary, or a container. All three serve the same
+`pb_data`, so the choice is about how you like to start things, not about which
+server you end up with.
 
 Building any of them is [BUILD.md](BUILD.md).
 
 - [The first device, and every one after it](#the-first-device-and-every-one-after-it)
 - [Command line](#command-line)
-- [Desktop window](#desktop-window)
+- [The desktop console](#the-desktop-console)
 - [Docker](#docker)
 - [Leaving it running](#leaving-it-running)
 - [Finding it on a local network](#finding-it-on-a-local-network)
@@ -69,51 +69,65 @@ localhost by default, because this server speaks plain HTTP and holds
 everybody's ciphertext — a public interface means device tokens crossing the
 network in the clear. `SYNC_ADDR` and `SYNC_DIR` are what `run.sh` reads.
 
-## Desktop window
+## The desktop console
 
 ```sh
-./scripts/build.sh --desktop
-./dist/summareader-sync-gui-linux-amd64 gui
+cd console && flutter run -d linux    # from source
+./scripts/build.sh --console          # or built, into console/build/
 ```
 
-`--http` and `--dir` work here too; without them it opens on `127.0.0.1:8099`
-and `~/.config/summareader-sync`. If a service is already installed, the window
-opens on *that* service's address instead, because that is where the server
-actually is.
+The console is a Flutter desktop app, a separate program from the server rather
+than a window inside it — [BUILD.md](BUILD.md) says why, and how it finds the
+server binary to run.
 
-![The desktop window: status, counts, the configuration panel and the three buttons](docs/desktop-window.png)
+`--http` and `--dir` work here too, spelled as the server spells them; without
+them it opens on `127.0.0.1:8099` and `~/.config/summareader-sync`. If a
+service is already installed, it opens on *that* service's address instead,
+because that is where the server actually is.
+
+![The console: status, counts, the device list, the configuration panel and the three buttons](docs/desktop-window.png)
 
 What it shows and what each control does:
 
 | | |
 |---|---|
-| **status line** | whether the server is up, on which address, and — when a unit is installed — that systemd is the one running it |
+| **status line** | whether the server is up, on which address, and — when a unit is installed — that systemd is the one running it. Also when there is no server binary to be found, which is the one failure that would otherwise look like a button that does nothing |
 | **counts** | devices, log entries and what the database weighs |
 | **the device list** | every device paired with this server: what it is called, when it was last heard from, and how many entries it has sent. Revoked devices stay on the list and say so — a device someone stopped is one they should still be able to see — and so does a device that has sent nothing, which is either brand new or not getting through |
 | **Address** | the bind address and port. Loopback and `0.0.0.0` are offered first because they are the two *decisions*; after them, every address this machine actually answers on, labelled with its interface. Changing either restarts the server, and rewrites the unit when there is one |
 | **Data directory** | where the database is. Set with `--dir` at launch; not editable here |
-| **Start at login** | writes `~/.config/systemd/user/summareader-sync.service` and enables it, so the server comes back after a reboot without the window. Unchecking removes it again. Linux only — the row is absent elsewhere |
+| **Start at login** | writes `~/.config/systemd/user/summareader-sync.service` and enables it, so the server comes back after a reboot without the console. Unchecking removes it again. Linux only — the row is absent elsewhere |
 | **running** | what that unit runs: this binary, or `docker compose`. The container choice appears only when there is a `docker-compose.yml` next to the binary or beside the data directory |
 | **Start / Stop** | the server. With a unit installed this drives `systemctl --user`; without one it starts a child process |
 | **Open dashboard** | PocketBase's admin interface, which is the real one — see [Administration](#administration) |
 | **Create first device** | with an empty server: makes the library and shows its token, as text and as a QR code, with a menu of which address to put in the code |
 | **Add a device** | with a library already there: explains that a device joins by scanning a code **in SummaReader**, and hands you the `/enroll` request |
 
-**The window supervises the server as a child process rather than embedding
-it.** It runs the same argv the systemd unit runs, so the desktop path and the
-service path cannot drift into two different servers, and the server's own
-`log.Fatal` cannot take the window down with it. The counts come from that
-process's `/metrics` and `/overview`, with a token minted per window, rather
-than from a second connection to the SQLite file it is writing.
+**The console supervises the server as a child process rather than embedding
+it.** It runs the same argv the systemd unit runs — one function produces both,
+and a test asserts they match — so the console path and the service path cannot
+drift into two different servers, and the server's own `log.Fatal` cannot take
+the console down with it. The counts come from that process's `/metrics` and
+`/overview`, rather than from a second connection to the SQLite file it is
+writing.
 
 **One owner at a time.** With a unit installed, systemd owns the server and the
-window is a remote control for it: Start and Stop drive `systemctl`, and the
-window never starts a child of its own. Two processes writing one SQLite file
-is how a sync server corrupts itself, and neither of them would notice.
+console is a remote control for it: Start and Stop drive `systemctl`, and the
+console never starts a child of its own. Two processes writing one SQLite file
+is how a sync server corrupts itself, and neither of them would notice. Closing
+the console stops a child it started, for the same reason — an unsupervised
+child leaves the next Start finding the port taken with nothing to say why —
+and never stops a server systemd owns, since being left running is the whole
+point of having installed one.
 
-The QR code the window draws carries the address and a token, and deliberately
-**no key** — unlike the app's own pairing code. It is what typing those two
-things by hand would say, in a form a camera can read.
+The metrics token, when a unit is installed, is read back out of that unit
+rather than minted fresh. A new token against a full server reads as zero
+devices, which looks exactly like a server nobody has ever paired with.
+
+The QR code the console draws carries the address and a token —
+`{"version":2,"server":…,"device_token":…}` — and deliberately **no key**,
+unlike the app's own pairing code. It is what typing those two things by hand
+would say, in a form a camera can read.
 
 ## Docker
 
@@ -142,7 +156,7 @@ mount the container cannot write reports `attempt to write a readonly
 database`, which is a permission error wearing a misleading sentence.
 
 `SUMMAREADER_METRICS_TOKEN` is passed through when set, which is how the
-desktop window reads the counts out of a container it started.
+console reads the counts out of a container it started.
 
 Losing `pb_data` does not lose anybody's library — those live on the devices —
 but it does lose every device's token and the account they share, so every
@@ -155,8 +169,8 @@ device would have to be paired again.
 ./scripts/install.sh --uninstall  # reversed; the database is kept
 ```
 
-The desktop window's "Start at login" switch does the same thing, for somebody
-who has the binary and not the repository. Either way it is a *user* service,
+The console's "Start at login" switch does the same thing, for somebody who
+has the binaries and not the repository. Either way it is a *user* service,
 under `~/.config/systemd/user`: this holds one person's ciphertext on one
 person's machine, and a unit there needs no root to install, inspect or remove.
 For a shared box, copy it to `/etc/systemd/system`, give it a `User=` and drop
@@ -170,14 +184,14 @@ sudo loginctl enable-linger "$USER"    # or it stops when you log out
 
 `scripts/summareader-sync.service` is the template the installer script fills
 in — edit that rather than the installed copy, which is overwritten on the next
-install. The window writes its unit directly and does not read that template;
+install. The console writes its unit directly and does not read that template;
 turning the switch off removes what it wrote.
 
 The Docker path installed by `install.sh --docker` has no unit at all:
 `restart: unless-stopped` and an enabled `docker.service` already bring the
 container back, and a unit beside compose is a second thing to keep in step.
-The window's switch is the exception — there, one checkbox covers both, and one
-place to look when it did not come back.
+The console's switch is the exception — there, one checkbox covers both, and
+one place to look when it did not come back.
 
 ## Finding it on a local network
 
@@ -264,12 +278,12 @@ server can offer is a wipe.
 
 ## Metrics
 
-`GET /overview` answers the same token with the window's version of the same
+`GET /overview` answers the same token with the console's version of the same
 question: totals, plus every device with its label, last-seen and how much it
 has appended. It exists because `/metrics` is counts-only by design — a
 per-device table there would mean Prometheus labels carrying people's device
 names — and because `/devices` answers a *device* token and is scoped to that
-device's account, which an operator's window does not have. Nothing in it
+device's account, which an operator's console does not have. Nothing in it
 describes the contents of an entry, for the same reason nothing in `/metrics`
 does: the server cannot read one.
 
