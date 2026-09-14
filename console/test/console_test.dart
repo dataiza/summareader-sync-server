@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
@@ -10,6 +11,8 @@ import 'package:summareader_sync_console/src/server.dart';
 import 'package:summareader_sync_console/src/service.dart';
 
 void main() {
+  _deviceControls();
+
   // The unit file is written by the console and read by systemd, and nothing
   // in between ever looks at it. A wrong ExecStart is a service that fails at
   // the next login, silently, in a log nobody has open — so the bytes are
@@ -329,6 +332,60 @@ void main() {
     test('the metrics token is never written by a rebind', () {
       saveConfig(dir.path, {'http': 'a:1'});
       expect(readConfig(dir.path).containsKey('metrics_token'), isFalse);
+    });
+  });
+}
+
+void _deviceControls() {
+  group('what an operator can do to a device', () {
+    // Not running, so the server's own Start/Stop button says "Start" and
+    // cannot be confused with the Stop on a device row.
+    ConsoleState stateWith(List<PairedDevice> paired) =>
+        ConsoleState(dir: '/tmp', addr: '127.0.0.1:8099', paired: paired);
+
+    testWidgets('a stopped device offers Resume, not Stop', (tester) async {
+      // Stopping was one-way in the window though never in the data: the
+      // column has always been a boolean, and a device stopped by mistake
+      // needed pairing again from scratch to come back.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: stateWith([
+                const PairedDevice(id: 'd1', label: 'Phone', revoked: true),
+              ]),
+              onResume: (_) {},
+              onRemove: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Resume'), findsOneWidget);
+      expect(find.text('Stop'), findsNothing);
+      expect(find.text('Remove'), findsOneWidget);
+    });
+
+    testWidgets('a working device offers Stop and Rename', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: stateWith([const PairedDevice(id: 'd1', label: 'Phone')]),
+              onRename: (_) {},
+              onRevoke: (_) {},
+              onRemove: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Stop'), findsOneWidget);
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Resume'), findsNothing);
+      // Whichever state it is in: a device worth forgetting is usually one
+      // that was stopped first.
+      expect(find.text('Remove'), findsOneWidget);
     });
   });
 }

@@ -112,8 +112,18 @@ POST /rename     the caller says what it is called
 
 ```
 POST /operator/rename   {device, label}   rename any device on this server
-POST /operator/revoke   {device}          stop any device syncing
+POST /operator/revoke   {device}          stop any device syncing, reversibly
+POST /operator/resume   {device}          let a stopped device sync again
+POST /operator/remove   {device}          forget a device entirely
 ```
+
+Stopping and removing are different things and the difference is worth stating:
+a stopped device keeps its row, its name and its token, and `resume` puts it
+back — which is the honest answer for a phone somebody still owns, or a device
+stopped while its owner was away. Removing takes the token with the row, so it
+cannot be resumed; it is for a device that is gone. What either one has already
+downloaded stays on it, because the key is on the device and nothing here can
+reach that.
 
 `/rename` and `/revoke` above answer a **device** token and act on the caller.
 That is right for a phone renaming itself and useless to whoever runs the
@@ -140,7 +150,25 @@ From a terminal, against a server that is running:
 summareader-sync devices list                       [--json]
 summareader-sync devices rename <device-id> <name>  [--json]
 summareader-sync devices revoke <device-id>         [--json]
+summareader-sync devices resume <device-id>         [--json]
+summareader-sync devices remove <device-id>         [--json]
 ```
+
+## What the server calls itself
+
+`--name`, `SUMMAREADER_NAME`, or `"name"` in the config file. It is what the
+dashboard shows and what the local-network advertisement carries, and it
+defaults to `Acme` because that is PocketBase's own default and this does not
+override one that has not been set.
+
+**It is not the server's identity.** That is generated when the database is
+made and stored beside it, and it is what `/instance` answers with — so two
+servers may be called the same thing without a device mistaking one for the
+other. They could not, until recently: the name *was* the identity, nobody
+ever set it, and every server in existence therefore claimed to be "Acme".
+A client pointed at a recreated database saw an identity it recognised,
+concluded nothing had changed, and collected refusals it had no way to
+explain.
 
 HTTP rather than opening the database, unlike `first-device`: that one has to
 write before a server exists and the console stops the server to run it, which

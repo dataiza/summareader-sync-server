@@ -129,3 +129,108 @@ func TestTheDeviceCommandsAreRegistered(t *testing.T) {
 		t.Fatal("registerCommands no longer calls registerDeviceCommands")
 	}
 }
+
+func TestStoppingIsReversible(t *testing.T) {
+	// The column was always a boolean; only the interface made it one-way. A
+	// device stopped by mistake, or stopped while somebody was away, needed
+	// pairing again from scratch to come back.
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone, err := enrollDevice(app, account.AccountID, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := revokeDevice(app, account.AccountID, phone.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := accountForToken(app, phone.Token); !errors.Is(err, ErrNoAccount) {
+		t.Fatal("a stopped device still syncs")
+	}
+
+	if err := resumeDevice(app, account.AccountID, phone.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	// The same token: nothing had to be carried back to the device.
+	if _, _, err := accountForToken(app, phone.Token); err != nil {
+		t.Fatalf("a resumed device cannot sync: %v", err)
+	}
+}
+
+func TestRemovingIsNotStopping(t *testing.T) {
+	// Stopping keeps the row, which is the honest state for a phone somebody
+	// still owns. Removing is for one that is gone, and takes the token with
+	// it — so it cannot be resumed.
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone, err := enrollDevice(app, account.AccountID, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeDevice(app, account.AccountID, phone.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+
+	devices, err := listDevices(app, account.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 1 || devices[0].Label != "Desktop" {
+		t.Fatalf("removed device is still listed: %v", devices)
+	}
+	if err := resumeDevice(app, account.AccountID, phone.DeviceID); err == nil {
+		t.Fatal("a removed device was resumed")
+	}
+}
+
+func TestRemovingIsScopedToTheAccount(t *testing.T) {
+	// The same guard revoke and rename carry: an id from one account must not
+	// reach another's rows.
+	app, _ := newTestApp(t)
+	mine, err := createAccount(app, "Mine", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := createAccount(app, "Theirs", "Their laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeDevice(app, mine.AccountID, theirs.DeviceID); err == nil {
+		t.Fatal("removed a device belonging to another account")
+	}
+	if _, _, err := accountForToken(app, theirs.Token); err != nil {
+		t.Fatal("the other account's device stopped working anyway")
+	}
+}
+
+func TestTheNameIsNotTheIdentity(t *testing.T) {
+	// Two servers may be called the same thing without either being mistaken
+	// for the other. That was the arrangement missing when the name *was* the
+	// identity and every install was called "Acme".
+	first, _ := newTestApp(t)
+	second, _ := newTestApp(t)
+
+	settings.Name = "Home"
+	t.Cleanup(func() { settings.Name = "" })
+	if err := applyServerName(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyServerName(second); err != nil {
+		t.Fatal(err)
+	}
+
+	if first.Settings().Meta.AppName != "Home" {
+		t.Fatalf("name is %q", first.Settings().Meta.AppName)
+	}
+	if instanceId(first) == instanceId(second) {
+		t.Fatal("two servers sharing a name share an identity")
+	}
+}

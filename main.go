@@ -56,7 +56,10 @@ func main() {
 		if err := e.Next(); err != nil {
 			return err
 		}
-		return ensureSchema(e.App)
+		if err := ensureSchema(e.App); err != nil {
+			return err
+		}
+		return applyServerName(e.App)
 	})
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
@@ -91,6 +94,13 @@ func main() {
 	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce",
 		settings.NoAnnounce,
 		"do not advertise this server on the local network")
+
+	// What this server calls itself. Display only — the identity `/instance`
+	// answers with is generated and stored, so two servers may share a name
+	// without a device mistaking one for the other.
+	app.RootCmd.PersistentFlags().StringVar(&settings.Name, "name",
+		settings.Name,
+		"what this server calls itself (default: Acme)")
 
 	// Registered so cobra accepts it; the value was read before cobra existed,
 	// by configPath, because the file has to be found before the flags it
@@ -199,6 +209,8 @@ func registerRoutes(e *core.ServeEvent) {
 	// no way to do either, on a box they own.
 	e.Router.POST("/operator/rename", handleOperatorRename)
 	e.Router.POST("/operator/revoke", handleOperatorRevoke)
+	e.Router.POST("/operator/resume", handleOperatorResume)
+	e.Router.POST("/operator/remove", handleOperatorRemove)
 
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
@@ -497,6 +509,27 @@ func handleWipe(e *core.RequestEvent) error {
 // handleInstance identifies this server so a client can distinguish an empty
 // account from a different server. Without it, pointing at a fresh instance
 // looks identical to "everything was deleted".
+// applyServerName puts the configured name where PocketBase keeps its own.
+//
+// Display only. It is what the dashboard shows and what the network
+// advertisement carries, and it is deliberately *not* what `/instance`
+// answers with any more — that used to be this value, which meant a server
+// nobody had renamed claimed the identity "Acme" along with every other one.
+// Naming two servers the same thing is now a cosmetic decision rather than a
+// way to make a device mistake one for the other.
+func applyServerName(app core.App) error {
+	want := strings.TrimSpace(settings.Name)
+	if want == "" {
+		return nil
+	}
+	current := app.Settings()
+	if current.Meta.AppName == want {
+		return nil
+	}
+	current.Meta.AppName = want
+	return app.Save(current)
+}
+
 func handleInstance(e *core.RequestEvent) error {
 	// The stored identity, not the display name. See ensureInstanceId: the
 	// display name is "Acme" on every install nobody has renamed, which made
@@ -753,6 +786,15 @@ type operatorRevokeRequest struct {
 }
 
 func handleOperatorRevoke(e *core.RequestEvent) error {
+	return operatorOnDevice(e, "could not stop that device", revokeDevice)
+}
+
+// One shape for the three that take a device and do one thing to it.
+func operatorOnDevice(
+	e *core.RequestEvent,
+	wrong string,
+	act func(app core.App, accountID, deviceID string) error,
+) error {
 	if ok, err := operatorOK(e); !ok {
 		return err
 	}
@@ -766,12 +808,20 @@ func handleOperatorRevoke(e *core.RequestEvent) error {
 		})
 	}
 
-	if err := revokeDevice(e.App, record.GetString("account"), record.Id); err != nil {
+	if err := act(e.App, record.GetString("account"), record.Id); err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "could not stop that device",
+			"error": wrong,
 		})
 	}
 	return e.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+func handleOperatorResume(e *core.RequestEvent) error {
+	return operatorOnDevice(e, "could not resume that device", resumeDevice)
+}
+
+func handleOperatorRemove(e *core.RequestEvent) error {
+	return operatorOnDevice(e, "could not remove that device", removeDevice)
 }
 
 func handleListDevices(e *core.RequestEvent) error {

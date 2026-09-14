@@ -28,6 +28,7 @@ class ConsoleState {
     this.docker = false,
     this.compose = false,
     this.linux = true,
+    this.name = '',
     this.serverBinary,
     this.error,
   });
@@ -56,6 +57,10 @@ class ConsoleState {
   /// Whether "Start at login" exists at all. A control that cannot work is
   /// worse than an absent one: it invites the question of why it did nothing.
   final bool linux;
+
+  /// What the server calls itself. Empty means it has never been named, and
+  /// answers with PocketBase's own default.
+  final String name;
 
   /// The server binary this console would run, or null when there is none.
   final String? serverBinary;
@@ -120,6 +125,9 @@ class ConsoleView extends StatelessWidget {
     this.onRunAs,
     this.onRename,
     this.onRevoke,
+    this.onResume,
+    this.onRemove,
+    this.onName,
   });
 
   final ConsoleState state;
@@ -135,6 +143,9 @@ class ConsoleView extends StatelessWidget {
   // because this widget has no state to hold a confirmation in.
   final ValueChanged<PairedDevice>? onRename;
   final ValueChanged<PairedDevice>? onRevoke;
+  final ValueChanged<PairedDevice>? onResume;
+  final ValueChanged<PairedDevice>? onRemove;
+  final ValueChanged<String>? onName;
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +167,13 @@ class ConsoleView extends StatelessWidget {
                   style: Ar.bodyStyle(13.5, color: Ar.dim(0.6)),
                 ),
                 const SizedBox(height: 26),
+                // Four sections by subject rather than one card of
+                // everything: what is true right now, what you press to
+                // change it, who is paired with it, and how it is reached.
+                // Start, the dashboard and pairing were all inside "Status",
+                // which is a heading about none of them.
                 _status(context),
+                _running(),
                 _devices(),
                 _address(),
                 if (state.linux) _atLogin(),
@@ -276,6 +293,21 @@ class ConsoleView extends StatelessWidget {
             message,
             style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
           ),
+      ]),
+    );
+  }
+
+  /// The controls, which are not the status.
+  ///
+  /// They shared a card with the running dot and the counts, under a heading
+  /// that describes only those — so "Start" and "Pair a device" lived under
+  /// "Status", which is a word about neither.
+  Widget _running() {
+    final missing = state.serverBinary == null;
+    return _section(
+      'Running it',
+      'Starting and stopping, the dashboard, and letting a device in.',
+      _card([
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -351,13 +383,22 @@ class ConsoleView extends StatelessWidget {
             ],
           ),
         ),
-        if (device.revoked)
+        // A stopped device keeps its row and its name. Resume is the other
+        // half of Stop, which had none: stopping was one-way in the window
+        // though never in the data.
+        if (device.revoked) ...[
           Tag(
-            label: 'revoked',
+            label: 'stopped',
             background: Ar.neutral300,
             foreground: Ar.dim(0.7),
-          )
-        else ...[
+          ),
+          const SizedBox(width: 8),
+          PillButton(
+            label: 'Resume',
+            height: 32,
+            onTap: onResume == null ? null : () => onResume!(device),
+          ),
+        ] else ...[
           PillButton(
             label: 'Rename',
             height: 32,
@@ -370,6 +411,14 @@ class ConsoleView extends StatelessWidget {
             onTap: onRevoke == null ? null : () => onRevoke!(device),
           ),
         ],
+        const SizedBox(width: 8),
+        // Available whichever state it is in: a device worth forgetting is
+        // usually one that was stopped first.
+        PillButton(
+          label: 'Remove',
+          height: 32,
+          onTap: onRemove == null ? null : () => onRemove!(device),
+        ),
       ],
     );
   }
@@ -377,10 +426,25 @@ class ConsoleView extends StatelessWidget {
   Widget _address() {
     final (host, port) = splitBind(state.addr);
     return _section(
-      'Address',
-      'Where the server listens. Changing either restarts it — and rewrites '
-          'the unit when there is one.',
+      'How it is reached',
+      'What this server is called and where it listens. Changing any of them '
+          'restarts it — and rewrites the unit when there is one.',
       _card([
+        _row(
+          'Name',
+          SizedBox(
+            width: 220,
+            child: _NameField(name: state.name, onSubmitted: onName),
+          ),
+        ),
+        // Said here because the obvious reading of a name field is the wrong
+        // one: this is a label, and two servers sharing it is fine.
+        Text(
+          'A label for the dashboard and the network advertisement. Devices '
+          'tell servers apart by an identity generated when the database was '
+          'made, not by this — so two servers may share a name safely.',
+          style: Ar.bodyStyle(12.5, color: Ar.dim(0.6), height: 1.5),
+        ),
         _row(
           'Bind address',
           Wrap(
@@ -463,6 +527,38 @@ class ConsoleView extends StatelessWidget {
 ///
 /// Its own widget because a controller rebuilt on every poll loses the caret
 /// twice a second, which is a field nobody can type four digits into.
+/// The same shape as [_PortField], and for the same reason: a text field
+/// needs a controller, and this view is stateless because everything else in
+/// it is drawn from what the screen already knows.
+class _NameField extends StatefulWidget {
+  const _NameField({required this.name, this.onSubmitted});
+
+  final String name;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<_NameField> createState() => _NameFieldState();
+}
+
+class _NameFieldState extends State<_NameField> {
+  late final _controller = TextEditingController(text: widget.name);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ArField(
+    controller: _controller,
+    // The default it falls back to, shown rather than described.
+    hint: 'Acme',
+    background: Ar.neutral100,
+    onSubmitted: widget.onSubmitted,
+  );
+}
+
 class _PortField extends StatefulWidget {
   const _PortField({required this.port, this.onSubmitted});
 

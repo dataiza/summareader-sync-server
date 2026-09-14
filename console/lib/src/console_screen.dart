@@ -38,6 +38,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// is on — and a poll two seconds later would otherwise put it back.
   bool _docker = false;
 
+  /// What the server calls itself. Empty means it has never been named, and
+  /// PocketBase's own default — "Acme" — is what it answers with.
+  String _name = '';
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +67,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     );
     _compose = exe == null ? null : composeFile(exe, widget.dir);
     _docker = serviceDocker();
+    _name = (readConfig(widget.dir)['name'] as String?) ?? '';
 
     _state = ConsoleState(
       dir: widget.dir,
@@ -131,6 +136,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         paired: devices ?? _state.paired,
         hosts: bindHosts(splitBind(_server.addr).$1, lan),
         linux: Platform.isLinux,
+        name: _name,
         serverBinary: _server.exe,
         atLogin: serviceInstalled(),
         // The unit is the truth once there is one; before that, whatever was
@@ -190,6 +196,34 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// on disk is a credential outliving the reason it existed — an operator who
   /// wants a scraper sets `metrics_token` themselves, and that one this
   /// console reads and never prints beside the address.
+  /// Renames the server.
+  ///
+  /// Display only — the identity `/instance` answers with is generated and
+  /// stored, so two servers may be called the same thing without a device
+  /// mistaking one for the other. That was not true while the name *was* the
+  /// identity and every install answered "Acme".
+  ///
+  /// Applied at bootstrap, so the server is restarted to pick it up — the
+  /// same dance a bind address change already does, and for the same reason.
+  Future<void> _rename(String next) async {
+    final wanted = next.trim();
+    if (wanted == _name) return;
+    try {
+      final wasRunning = await _server.running;
+      await _server.stop();
+      setState(() => _name = wanted);
+      saveConfig(widget.dir, {'name': wanted.isEmpty ? null : wanted});
+      if (serviceInstalled()) {
+        await installService(_serviceConfig());
+      } else if (wasRunning) {
+        await _server.start();
+      }
+    } on Object catch (error) {
+      _fail(error);
+    }
+    await _refresh();
+  }
+
   Future<void> _rebind(String next) async {
     if (next == _server.addr) return;
     try {
@@ -345,6 +379,55 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     );
   }
 
+  /// Lets a stopped device sync again. No question asked: it undoes something
+  /// rather than doing something, and it takes one press to undo again.
+  Future<void> _resumeDevice(PairedDevice device) async {
+    await _server.resume(device.id);
+    await _refresh();
+  }
+
+  /// Forgets a device. Asked first, because this one cannot be undone.
+  Future<void> _removeDevice(PairedDevice device) async {
+    final name = device.label.isEmpty ? device.id : device.label;
+    await showConsoleDialog(
+      context,
+      'Forget $name?',
+      Builder(
+        builder: (dialogContext) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Its token goes with it, so it cannot be resumed — it would '
+              'have to pair again from another device.\n\n'
+              'Stopping keeps the row and can be undone, and is the better '
+              'answer for a device somebody still has. This is for one that '
+              'is gone.\n\n'
+              'What it already downloaded stays on it either way. It holds '
+              'its own copy of the key, and nothing here can reach that.',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.7), height: 1.55),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                PillButton(
+                  label: 'Forget it',
+                  onTap: () async {
+                    final navigator = Navigator.of(dialogContext);
+                    await _server.remove(device.id);
+                    navigator.pop();
+                    await _refresh();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ConsoleView(
     state: _state,
@@ -363,6 +446,9 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onAtLogin: _setAtLogin,
     onRename: _renameDevice,
     onRevoke: _revokeDevice,
+    onResume: _resumeDevice,
+    onRemove: _removeDevice,
+    onName: _rename,
     onRunAs: _setRunAs,
   );
 }

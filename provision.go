@@ -301,6 +301,49 @@ func revokeDevice(app core.App, accountID, deviceID string) error {
 	return app.Save(record)
 }
 
+// resumeDevice lets a stopped device sync again.
+//
+// The other half of revoking, which had none: stopping a device was a
+// one-way door in an interface, though never in the data — the column has
+// always been a boolean. A device stopped by mistake, or stopped on purpose
+// while somebody was away, needed pairing again from scratch to come back.
+//
+// It keeps its own token, so nothing has to be carried to it. That is the
+// difference between this and removing it.
+func resumeDevice(app core.App, accountID, deviceID string) error {
+	record, err := app.FindRecordById(collDevices, deviceID)
+	if err != nil {
+		return err
+	}
+	if record.GetString("account") != accountID {
+		return fmt.Errorf("no such device on this account")
+	}
+	record.Set("revoked", false)
+	return app.Save(record)
+}
+
+// removeDevice deletes the row.
+//
+// Stopping keeps the device listed and stopped, which is the honest state for
+// a phone somebody still owns and a name worth remembering. Removing is for a
+// device that is gone: sold, wiped, or enrolled by mistake — where leaving it
+// on the list for ever is a row nobody can act on.
+//
+// Not reversible, and not the same as stopping. The token goes with the row,
+// so a device removed cannot be resumed; it has to pair again. What it has
+// already downloaded stays on it either way — the key is on the device, and
+// nothing here can reach that.
+func removeDevice(app core.App, accountID, deviceID string) error {
+	record, err := app.FindRecordById(collDevices, deviceID)
+	if err != nil {
+		return err
+	}
+	if record.GetString("account") != accountID {
+		return fmt.Errorf("no such device on this account")
+	}
+	return app.Delete(record)
+}
+
 // renameDevice sets a device's own label.
 //
 // Its own, and nobody else's: the caller is identified by the token it

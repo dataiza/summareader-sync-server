@@ -238,8 +238,20 @@ class SyncServer {
       _post('/operator/rename', {'device': deviceId, 'label': label});
 
   /// Stops a device syncing. Null on success, otherwise what went wrong.
+  ///
+  /// Reversible — see [resume]. The device keeps its own token, so nothing has
+  /// to be carried back to it.
   Future<String?> revoke(String deviceId) =>
       _post('/operator/revoke', {'device': deviceId});
+
+  /// Lets a stopped device sync again.
+  Future<String?> resume(String deviceId) =>
+      _post('/operator/resume', {'device': deviceId});
+
+  /// Forgets a device entirely. Its token goes with it, so it cannot be
+  /// resumed — it would have to pair again.
+  Future<String?> remove(String deviceId) =>
+      _post('/operator/remove', {'device': deviceId});
 
   /// Null when it worked, otherwise a sentence to show.
   Future<String?> _post(String path, Map<String, String> body) async {

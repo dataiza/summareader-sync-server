@@ -33,6 +33,15 @@ type Config struct {
 	// handed to a monitoring system; this one can rename and revoke devices,
 	// and a scraper has no business holding it.
 	OperatorToken string `json:"operator_token,omitempty"`
+	// What this server calls itself, on the network and in its own dashboard.
+	//
+	// Display only — the identity `/instance` answers with is generated and
+	// stored, and is not this. Two servers may be called the same thing
+	// without either being confused for the other, which is the arrangement
+	// that was missing when the name *was* the identity.
+	//
+	// Empty leaves PocketBase's default, which is "Acme".
+	Name string `json:"name,omitempty"`
 	// Do not advertise this server on the local network.
 	NoAnnounce bool `json:"no_announce,omitempty"`
 }
@@ -144,6 +153,9 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := strings.TrimSpace(getenv("SUMMAREADER_OPERATOR_TOKEN")); v != "" {
 		cfg.OperatorToken = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_NAME")); v != "" {
+		cfg.Name = v
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)

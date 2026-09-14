@@ -161,7 +161,7 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 
 	revoke := &cobra.Command{
 		Use:   "revoke <device-id>",
-		Short: "Stop a device syncing",
+		Short: "Stop a device syncing, reversibly",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			payload, err := get("/operator/revoke", map[string]string{
@@ -177,9 +177,57 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 			}
 			// What revocation is and is not, in the one place somebody is
 			// doing it from a terminal and has nothing else to read.
-			cmd.Println("Stopped. It can no longer sync.")
+			cmd.Println("Stopped. It can no longer sync, and `devices resume`")
+			cmd.Println("will let it again — it keeps its own token.")
 			cmd.Println("What it already downloaded stays on it — it holds its")
 			cmd.Println("own copy of the key, and nothing here can reach that.")
+		},
+	}
+
+	// Stopping and resuming are the same switch, which is why they are two
+	// commands over one column rather than two states of a verb.
+	resume := &cobra.Command{
+		Use:   "resume <device-id>",
+		Short: "Let a stopped device sync again",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			payload, err := get("/operator/resume", map[string]string{
+				"device": args[0],
+			})
+			if err != nil {
+				cmd.PrintErrln(err)
+				os.Exit(1)
+			}
+			if asJSON {
+				fmt.Println(string(payload))
+				return
+			}
+			cmd.Println("Syncing again. It kept its own token, so there is")
+			cmd.Println("nothing to carry to it.")
+		},
+	}
+
+	remove := &cobra.Command{
+		Use:   "remove <device-id>",
+		Short: "Forget a device entirely",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			payload, err := get("/operator/remove", map[string]string{
+				"device": args[0],
+			})
+			if err != nil {
+				cmd.PrintErrln(err)
+				os.Exit(1)
+			}
+			if asJSON {
+				fmt.Println(string(payload))
+				return
+			}
+			// The difference from `revoke`, said where somebody is about to
+			// wonder which of the two they wanted.
+			cmd.Println("Removed. Its token went with it, so it cannot be")
+			cmd.Println("resumed — it would have to pair again.")
+			cmd.Println("What it already downloaded stays on it either way.")
 		},
 	}
 
@@ -190,6 +238,6 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 	devices.PersistentFlags().BoolVar(&asJSON, "json", false,
 		"print the result as JSON")
 
-	devices.AddCommand(list, rename, revoke)
+	devices.AddCommand(list, rename, revoke, resume, remove)
 	app.RootCmd.AddCommand(devices)
 }
