@@ -2,8 +2,10 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -119,6 +121,57 @@ func enrollDevice(app core.App, accountID, label string) (*Device, error) {
 		Token:     token,
 		Label:     label,
 	}, nil
+}
+
+// setJoinVerifier records what a typed recovery code must prove to join.
+//
+// Called by a device that already has a token, at the moment it mints a code.
+// The verifier is a hash of a value derived from the code; the code itself
+// never reaches the server, and neither does the key that unwraps the master.
+// Overwriting it is how rotation revokes the old code — the wrapped key under
+// `recovery-v1` is replaced in the same act, so a stale code loses both halves
+// together rather than keeping one and silently half-working.
+func setJoinVerifier(app core.App, accountID, verifier string) error {
+	record, err := app.FindRecordById(collAccounts, accountID)
+	if err != nil {
+		return err
+	}
+	record.Set("join_verifier", verifier)
+	return app.Save(record)
+}
+
+// joinDevice issues a token to a device that holds nothing but the code.
+//
+// The one route that takes no token, because there is nobody to be yet: this
+// is how a device with no key material and no enrolment gets in. What it
+// proves is knowledge of the recovery code, which is ~147 bits, so guessing is
+// not a threat worth rate-limiting. Nothing is created on a failed attempt.
+//
+// The empty check is load-bearing rather than tidiness. Every account made
+// before join_verifier existed holds "", so a filter on the verifier alone
+// would match all of them at once and hand a token to whoever asked with
+// nothing — the first account on the server, to someone who knows no code.
+func joinDevice(app core.App, proof, label string) (*Device, error) {
+	if strings.TrimSpace(proof) == "" {
+		return nil, ErrNoAccount
+	}
+
+	sum := sha256.Sum256([]byte(proof))
+	verifier := base64.RawURLEncoding.EncodeToString(sum[:])
+
+	record, err := app.FindFirstRecordByFilter(
+		collAccounts,
+		"join_verifier = {:verifier} && join_verifier != ''",
+		dbx.Params{"verifier": verifier},
+	)
+	if err != nil || record == nil {
+		return nil, ErrNoAccount
+	}
+
+	// The same enrolment an existing device would have performed, so a joined
+	// device is an ordinary device: revocable, listable, nothing special about
+	// how it got here.
+	return enrollDevice(app, record.Id, label)
 }
 
 // listDevices returns an account's devices, without their tokens.

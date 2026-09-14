@@ -42,17 +42,47 @@ func quotaField() *core.NumberField {
 	return &core.NumberField{Name: "quota_bytes", Required: false}
 }
 
+// What a device must show to join by typed code: SHA-256 of the proof the
+// recovery code derives, base64. Never the code, and never anything that opens
+// the wrapped master key — see provision.go.
+//
+// Empty on every account made before this existed, and on every account whose
+// owner has not made a recovery code. joinDevice refuses an empty one rather
+// than matching all of them.
+func joinVerifierField() *core.TextField {
+	return &core.TextField{Name: "join_verifier", Max: 100}
+}
+
 func ensureAccounts(app core.App) error {
 	if existing, err := app.FindCollectionByNameOrId(collAccounts); err == nil {
 		// A server that predates quotas has every other field already. Adding
 		// the missing one here is what upgrades an existing deployment: the
 		// alternative is a migration to run by hand, on servers whose owners
 		// did not ask for a ceiling and will not be expecting a chore.
+		//
+		// Every missing field in one pass, and one save. Returning after the
+		// first one meant a server old enough to be missing two of them got
+		// the second only on its next boot — a route answering 500 for a day
+		// with nothing anywhere to say why.
+		changed := false
 		if existing.Fields.GetByName("quota_bytes") == nil {
 			existing.Fields.Add(quotaField())
-			return app.Save(existing)
+			changed = true
 		}
-		return nil
+		if existing.Fields.GetByName("join_verifier") == nil {
+			existing.Fields.Add(joinVerifierField())
+			// Added with the field rather than beside it: the two arrive
+			// together on every path, so a collection holding one and not the
+			// other cannot happen. Not unique — every account that predates
+			// this holds the same empty string, and a unique index over them
+			// refuses to save at all.
+			existing.AddIndex("idx_accounts_join", false, "join_verifier", "")
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		return app.Save(existing)
 	}
 
 	c := core.NewBaseCollection(collAccounts)
@@ -71,6 +101,8 @@ func ensureAccounts(app core.App) error {
 	c.Fields.Add(&core.BoolField{Name: "deleted_replacement"})
 
 	c.Fields.Add(quotaField())
+	c.Fields.Add(joinVerifierField())
+	c.AddIndex("idx_accounts_join", false, "join_verifier", "")
 
 	// No collection rules: every route is a Go handler that checks the device
 	// token itself. Rules are evaluated per record and cannot express "this

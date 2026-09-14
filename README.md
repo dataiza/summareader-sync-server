@@ -101,10 +101,21 @@ path.
 
 ```
 POST /enroll     issue a token for another device on this account
+POST /recovery   record what a typed recovery code must later prove
+POST /join       trade proof of that code for a token — no token required
 GET  /devices    list them — never with their tokens
 POST /revoke     stop one syncing
 POST /rename     the caller says what it is called
 ```
+
+`/join` is the one route with no `Authorization` header. `/enroll` needs a
+paired device to ask on the new one's behalf, which leaves nothing for a fresh
+install or for somebody who has lost every device — that gap is what this
+closes. It matches a hash of the proof against `accounts.join_verifier`, which
+is empty on every account that has never made a recovery code and is refused
+rather than matched, since a filter on the verifier alone would match all of
+them at once. Nothing is created on a failure and the device is not touched, so
+the column never becomes a record of who has been guessing.
 
 `/rename` exists because a label is otherwise written once, at enrolment, by
 whichever device minted the token. That suits a phone somebody is holding and

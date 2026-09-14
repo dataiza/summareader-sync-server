@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestCreateAccountIssuesAWorkingToken(t *testing.T) {
@@ -301,6 +305,164 @@ func TestRenamingIsScopedToTheAccount(t *testing.T) {
 	for _, d := range devices {
 		if d.Label == "Mine now" {
 			t.Fatal("the other account's device was renamed anyway")
+		}
+	}
+}
+
+// The verifier a code with this proof would have stored. The client derives
+// the proof from the typed code; the server only ever sees this hash of it.
+func verifierFor(proof string) string {
+	sum := sha256.Sum256([]byte(proof))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// Every device on the server, not one account's — a refused join must not
+// enrol anywhere, and the account it would have picked is the thing in doubt.
+func countAllDevices(t *testing.T, app core.App) int {
+	t.Helper()
+	records := []*core.Record{}
+	if err := app.RecordQuery(collDevices).All(&records); err != nil {
+		t.Fatal(err)
+	}
+	return len(records)
+}
+
+func TestJoinIssuesATokenForTheRightAccount(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	first, err := createAccount(app, "Someone else", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, first.AccountID, verifierFor("their-proof")); err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, second.AccountID, verifierFor("my-proof")); err != nil {
+		t.Fatal(err)
+	}
+
+	joined, err := joinDevice(app, "my-proof", "Phone")
+	if err != nil {
+		t.Fatalf("a correct proof was refused: %v", err)
+	}
+	if joined.AccountID != second.AccountID {
+		t.Fatal("the proof let the device into the wrong account")
+	}
+
+	// A joined device is an ordinary device: its token works like any other.
+	accountID, deviceID, err := accountForToken(app, joined.Token)
+	if err != nil {
+		t.Fatalf("the token just issued does not resolve: %v", err)
+	}
+	if accountID != second.AccountID {
+		t.Fatal("the token resolves to the wrong account")
+	}
+	if _, err := appendEntry(app, accountID, deviceID, "ciphertext"); err != nil {
+		t.Fatalf("a freshly joined device cannot append: %v", err)
+	}
+}
+
+func TestJoinWithAWrongProofCreatesNoDevice(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	account, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, account.AccountID, verifierFor("my-proof")); err != nil {
+		t.Fatal(err)
+	}
+
+	before := countAllDevices(t, app)
+	if _, err := joinDevice(app, "not-my-proof", "Phone"); err == nil {
+		t.Fatal("a wrong proof was let in")
+	}
+	// An implementation that enrols first and checks afterwards passes the
+	// line above and fails this one.
+	if after := countAllDevices(t, app); after != before {
+		t.Fatalf("a refused join left %d devices behind", after-before)
+	}
+}
+
+func TestJoinIgnoresAccountsWithNoVerifier(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	// Two accounts as they arrive from an older server: join_verifier is "".
+	for _, label := range []string{"Older library", "Another one"} {
+		if _, err := createAccount(app, label, "Desktop"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before := countAllDevices(t, app)
+	// A filter on the verifier alone matches every one of them at once, and
+	// the empty proof is what someone sending nothing at all would send.
+	for _, proof := range []string{"", "   ", "\t\n", "anything-at-all"} {
+		if _, err := joinDevice(app, proof, "Phone"); err == nil {
+			t.Fatalf("proof %q was let into an account that has no code", proof)
+		}
+	}
+	if after := countAllDevices(t, app); after != before {
+		t.Fatal("a refused join enrolled a device anyway")
+	}
+}
+
+func TestRotatingTheCodeLocksOutTheOldOne(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	account, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, account.AccountID, verifierFor("old-proof")); err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, account.AccountID, verifierFor("new-proof")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := joinDevice(app, "old-proof", "Phone"); err == nil {
+		t.Fatal("the replaced code still joins")
+	}
+	if _, err := joinDevice(app, "new-proof", "Phone"); err != nil {
+		t.Fatalf("the current code does not join: %v", err)
+	}
+}
+
+// A server old enough to be missing more than one field has to gain all of
+// them on the boot that notices, not one per boot.
+func TestSchemaUpgradeAddsEveryMissingField(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	accounts, err := app.FindCollectionByNameOrId(collAccounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts.Fields.RemoveByName("quota_bytes")
+	accounts.Fields.RemoveByName("join_verifier")
+	// The index goes with the column, which is what a server that predates
+	// both actually looks like — and SQLite refuses an index over a column
+	// that is not there, so leaving it would test the test.
+	accounts.RemoveIndex("idx_accounts_join")
+	if err := app.Save(accounts); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureSchema(app); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := app.FindCollectionByNameOrId(collAccounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"quota_bytes", "join_verifier"} {
+		if upgraded.Fields.GetByName(name) == nil {
+			t.Fatalf("%s is still missing after an upgrade boot", name)
 		}
 	}
 }

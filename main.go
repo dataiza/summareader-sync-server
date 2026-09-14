@@ -180,6 +180,14 @@ func registerRoutes(e *core.ServeEvent) {
 	// Provisioning. Not part of the five-operation sync contract — these are
 	// about who may sync at all, not about moving data.
 	e.Router.POST("/enroll", handleEnroll)
+	// What a typed recovery code must later prove. Set by a device that
+	// already has a token, at the moment it mints the code.
+	e.Router.POST("/recovery", handleSetJoinVerifier)
+	// The one route with no token. It cannot have one: this is a device
+	// holding nothing but a server address and a code someone typed, and
+	// requiring a credential to obtain a credential is the gap it exists to
+	// close. What it takes instead is proof of the code — see provision.go.
+	e.Router.POST("/join", handleJoin)
 	e.Router.GET("/devices", handleListDevices)
 	e.Router.POST("/revoke", handleRevoke)
 	e.Router.POST("/rename", handleRename)
@@ -608,6 +616,62 @@ func handleEnroll(e *core.RequestEvent) error {
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not enrol",
+		})
+	}
+	return e.JSON(http.StatusOK, device)
+}
+
+type joinVerifierRequest struct {
+	Verifier string `json:"verifier"`
+}
+
+func handleSetJoinVerifier(e *core.RequestEvent) error {
+	accountID, _, ok := authenticate(e)
+	if !ok {
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
+		})
+	}
+
+	var body joinVerifierRequest
+	_ = e.BindBody(&body)
+	verifier := strings.TrimSpace(body.Verifier)
+	if verifier == "" {
+		// Refused rather than stored. An empty verifier is the value every
+		// account that has never made a code already holds, and writing one
+		// deliberately would be indistinguishable from never having tried.
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "a verifier is required",
+		})
+	}
+
+	if err := setJoinVerifier(e.App, accountID, verifier); err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not store",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+type joinRequest struct {
+	Proof string `json:"proof"`
+	Label string `json:"label"`
+}
+
+func handleJoin(e *core.RequestEvent) error {
+	var body joinRequest
+	_ = e.BindBody(&body)
+	if body.Label == "" {
+		body.Label = "A new device"
+	}
+
+	device, err := joinDevice(e.App, body.Proof, body.Label)
+	if err != nil {
+		// The same wording a bad token gets, and no touchDevice: a refused
+		// attempt must leave nothing behind, or the server keeps a record of
+		// who has been guessing at codes.
+		return e.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "unknown or revoked device",
 		})
 	}
 	return e.JSON(http.StatusOK, device)
