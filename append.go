@@ -14,6 +14,10 @@ var ErrNoAccount = errors.New("unknown or revoked device")
 // ErrBatchTooLarge is returned when a batch asks for more than maxBatch.
 var ErrBatchTooLarge = errors.New("batch too large")
 
+// ErrLabelTaken is returned when another device on the account already
+// answers to the name being asked for.
+var ErrLabelTaken = errors.New("that name is already used on this library")
+
 // appendEntry writes one log entry and returns its sequence number.
 //
 // # Why this is a Go hook and not a collection rule

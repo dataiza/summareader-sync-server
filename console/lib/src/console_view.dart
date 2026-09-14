@@ -118,6 +118,8 @@ class ConsoleView extends StatelessWidget {
     this.onPort,
     this.onAtLogin,
     this.onRunAs,
+    this.onRename,
+    this.onRevoke,
   });
 
   final ConsoleState state;
@@ -128,6 +130,11 @@ class ConsoleView extends StatelessWidget {
   final ValueChanged<String>? onPort;
   final ValueChanged<bool>? onAtLogin;
   final ValueChanged<bool>? onRunAs;
+  // The list was read-only: an operator could see every device and could not
+  // rename or stop one, on a server they run. The dialogs live in the screen
+  // because this widget has no state to hold a confirmation in.
+  final ValueChanged<PairedDevice>? onRename;
+  final ValueChanged<PairedDevice>? onRevoke;
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +356,20 @@ class ConsoleView extends StatelessWidget {
             label: 'revoked',
             background: Ar.neutral300,
             foreground: Ar.dim(0.7),
+          )
+        else ...[
+          PillButton(
+            label: 'Rename',
+            height: 32,
+            onTap: onRename == null ? null : () => onRename!(device),
           ),
+          const SizedBox(width: 8),
+          PillButton(
+            label: 'Stop',
+            height: 32,
+            onTap: onRevoke == null ? null : () => onRevoke!(device),
+          ),
+        ],
       ],
     );
   }

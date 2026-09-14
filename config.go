@@ -27,6 +27,12 @@ type Config struct {
 	Dir string `json:"dir,omitempty"`
 	// The credential /metrics wants. Empty means the endpoint is off.
 	MetricsToken string `json:"metrics_token,omitempty"`
+	// The credential the operator routes want. Empty means they are off.
+	//
+	// Separate from MetricsToken on purpose. That one is read-only and gets
+	// handed to a monitoring system; this one can rename and revoke devices,
+	// and a scraper has no business holding it.
+	OperatorToken string `json:"operator_token,omitempty"`
 	// Do not advertise this server on the local network.
 	NoAnnounce bool `json:"no_announce,omitempty"`
 }
@@ -135,6 +141,9 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := strings.TrimSpace(getenv("SUMMAREADER_METRICS_TOKEN")); v != "" {
 		cfg.MetricsToken = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_OPERATOR_TOKEN")); v != "" {
+		cfg.OperatorToken = v
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)

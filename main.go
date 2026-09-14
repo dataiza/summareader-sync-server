@@ -192,6 +192,14 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/revoke", handleRevoke)
 	e.Router.POST("/rename", handleRename)
 
+	// The operator's own routes, on the operator's own credential. Renaming
+	// and revoking exist on /rename and /revoke already, but those answer a
+	// *device* token and act on the caller — which the terminal and the
+	// console window do not have and are not. Somebody running the server had
+	// no way to do either, on a box they own.
+	e.Router.POST("/operator/rename", handleOperatorRename)
+	e.Router.POST("/operator/revoke", handleOperatorRevoke)
+
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
 	e.Router.GET("/instance", handleInstance)
@@ -592,6 +600,8 @@ func registerCommands(app *pocketbase.PocketBase) {
 	pair.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON")
 
 	app.RootCmd.AddCommand(pair)
+
+	registerDeviceCommands(app)
 }
 
 type enrollRequest struct {
@@ -612,7 +622,17 @@ func handleEnroll(e *core.RequestEvent) error {
 		body.Label = "A new device"
 	}
 
-	device, err := enrollDevice(e.App, accountID, body.Label)
+	// Numbered rather than refused — see freeLabel. The app sends "A new
+	// device" whenever nobody typed a name, so refusing here would break the
+	// second unnamed pairing rather than teach anybody anything.
+	label, err := freeLabel(e.App, accountID, body.Label)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not enrol",
+		})
+	}
+
+	device, err := enrollDevice(e.App, accountID, label)
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not enrol",
@@ -677,6 +697,81 @@ func handleJoin(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, device)
 }
 
+type operatorRenameRequest struct {
+	Device string `json:"device"`
+	Label  string `json:"label"`
+}
+
+// The account comes from the device record rather than from the caller: an
+// operator is paired with nobody, so there is no account to scope them to.
+// The scope checks inside renameDevice and revokeDevice stay meaningful
+// because they are handed the account the device itself says it is on.
+func handleOperatorRename(e *core.RequestEvent) error {
+	if ok, err := operatorOK(e); !ok {
+		return err
+	}
+
+	var body operatorRenameRequest
+	_ = e.BindBody(&body)
+	label := strings.TrimSpace(body.Label)
+	if label == "" {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "a label is required",
+		})
+	}
+	if len([]rune(label)) > 200 {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "that label is too long",
+		})
+	}
+
+	record, err := e.App.FindRecordById(collDevices, strings.TrimSpace(body.Device))
+	if err != nil || record == nil {
+		return e.JSON(http.StatusNotFound, map[string]string{
+			"error": "no such device",
+		})
+	}
+
+	err = renameDevice(e.App, record.GetString("account"), record.Id, label)
+	if errors.Is(err, ErrLabelTaken) {
+		return e.JSON(http.StatusConflict, map[string]string{
+			"error": "another device on this library is already called that",
+		})
+	}
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not rename",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]string{"label": label})
+}
+
+type operatorRevokeRequest struct {
+	Device string `json:"device"`
+}
+
+func handleOperatorRevoke(e *core.RequestEvent) error {
+	if ok, err := operatorOK(e); !ok {
+		return err
+	}
+
+	var body operatorRevokeRequest
+	_ = e.BindBody(&body)
+	record, err := e.App.FindRecordById(collDevices, strings.TrimSpace(body.Device))
+	if err != nil || record == nil {
+		return e.JSON(http.StatusNotFound, map[string]string{
+			"error": "no such device",
+		})
+	}
+
+	if err := revokeDevice(e.App, record.GetString("account"), record.Id); err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not stop that device",
+		})
+	}
+	return e.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
 func handleListDevices(e *core.RequestEvent) error {
 	accountID, callerID, ok := authenticate(e)
 	if !ok {
@@ -739,6 +834,13 @@ func handleRename(e *core.RequestEvent) error {
 	}
 
 	if err := renameDevice(e.App, accountID, callerID, label); err != nil {
+		// A name somebody else is using is the one failure here a person can
+		// do something about, so it says so instead of reading as a fault.
+		if errors.Is(err, ErrLabelTaken) {
+			return e.JSON(http.StatusConflict, map[string]string{
+				"error": "another device on this library is already called that",
+			})
+		}
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not rename",
 		})

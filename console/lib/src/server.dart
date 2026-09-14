@@ -158,7 +158,15 @@ class SyncServer {
     final child = await Process.start(
       argv.first,
       argv.skip(1).toList(),
-      environment: {'SUMMAREADER_METRICS_TOKEN': token},
+      environment: {
+        'SUMMAREADER_METRICS_TOKEN': token,
+        // The same value under both names. They are separate credentials so
+        // that a *scraper* can be given the read-only one — the console is
+        // the operator and holds both by definition, and a second random
+        // string here would be one more thing to keep in step for no boundary
+        // that anybody stands on.
+        'SUMMAREADER_OPERATOR_TOKEN': token,
+      },
       mode: ProcessStartMode.inheritStdio,
     );
     _child = child;
@@ -216,6 +224,46 @@ class SyncServer {
       return await response.transform(utf8.decoder).join();
     } on Exception {
       return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Renames a device. True when the server took it.
+  ///
+  /// Not silent like the polling reads: somebody pressed a button and is
+  /// waiting to see whether it worked, and "the name is already used" is the
+  /// answer they most need.
+  Future<String?> rename(String deviceId, String label) =>
+      _post('/operator/rename', {'device': deviceId, 'label': label});
+
+  /// Stops a device syncing. Null on success, otherwise what went wrong.
+  Future<String?> revoke(String deviceId) =>
+      _post('/operator/revoke', {'device': deviceId});
+
+  /// Null when it worked, otherwise a sentence to show.
+  Future<String?> _post(String path, Map<String, String> body) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final request = await client.postUrl(Uri.parse('http://$addr$path'));
+      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(body));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final text = await response.transform(utf8.decoder).join();
+      if (response.statusCode == HttpStatus.ok) return null;
+      try {
+        final decoded = jsonDecode(text) as Map<String, dynamic>;
+        final message = decoded['error'];
+        if (message is String && message.isNotEmpty) return message;
+      } on FormatException {
+        // Fall through to the status line, which is better than nothing.
+      }
+      return 'the server refused that (${response.statusCode})';
+    } on Exception {
+      return 'could not reach the server';
     } finally {
       client.close(force: true);
     }

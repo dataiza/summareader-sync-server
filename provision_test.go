@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -464,5 +465,140 @@ func TestSchemaUpgradeAddsEveryMissingField(t *testing.T) {
 		if upgraded.Fields.GetByName(name) == nil {
 			t.Fatalf("%s is still missing after an upgrade boot", name)
 		}
+	}
+}
+
+func TestDuplicateLabelsAreRefusedOnRename(t *testing.T) {
+	// Two devices a person cannot tell apart in a list is the thing being
+	// prevented, so case and surrounding space do not make a name different.
+	for _, tc := range []struct {
+		existing, wanted string
+		refused          bool
+	}{
+		{"Phone", "Phone", true},
+		{"Phone", "phone", true},
+		{"Phone", "  Phone  ", true},
+		{"Phone", "PHONE", true},
+		{"Phone", "Tablet", false},
+	} {
+		app, _ := newTestApp(t)
+		first, err := createAccount(app, "My library", tc.existing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := enrollDevice(app, first.AccountID, "Somewhere else")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = renameDevice(app, first.AccountID, second.DeviceID, tc.wanted)
+		if tc.refused && !errors.Is(err, ErrLabelTaken) {
+			t.Fatalf("renaming to %q beside %q: want ErrLabelTaken, got %v",
+				tc.wanted, tc.existing, err)
+		}
+		if !tc.refused && err != nil {
+			t.Fatalf("renaming to %q beside %q: %v", tc.wanted, tc.existing, err)
+		}
+	}
+}
+
+func TestTheSameNameOnAnotherAccountIsFine(t *testing.T) {
+	// Accounts are separate libraries. What one calls its devices is none of
+	// the other's business.
+	app, _ := newTestApp(t)
+	mine, err := createAccount(app, "Mine", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := createAccount(app, "Theirs", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enrollDevice(app, theirs.AccountID, "Phone"); err != nil {
+		t.Fatalf("a name used on another account was refused: %v", err)
+	}
+	_ = mine
+}
+
+func TestRenamingToItsOwnNameIsFine(t *testing.T) {
+	// Without the except-itself clause every rename is refused, because every
+	// device already answers to the name it is being asked to keep.
+	app, _ := newTestApp(t)
+	first, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := renameDevice(app, first.AccountID, first.DeviceID, "Desktop"); err != nil {
+		t.Fatalf("renaming a device to its own name: %v", err)
+	}
+	// And a different case of its own name, which is the same device.
+	if err := renameDevice(app, first.AccountID, first.DeviceID, "desktop"); err != nil {
+		t.Fatalf("renaming a device to its own name in another case: %v", err)
+	}
+}
+
+func TestAnUnlabelledDeviceGetsAFreeName(t *testing.T) {
+	// The app sends "A new device" whenever nobody typed a name, so this is
+	// the ordinary path rather than an edge case. Refusing it would break the
+	// second pairing in a dialogue with no name field in view.
+	app, _ := newTestApp(t)
+	first, err := createAccount(app, "My library", "A new device")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := freeLabel(app, first.AccountID, "A new device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != "A new device 2" {
+		t.Fatalf("second unnamed device is %q, want \"A new device 2\"", second)
+	}
+	if _, err := enrollDevice(app, first.AccountID, second); err != nil {
+		t.Fatal(err)
+	}
+
+	third, err := freeLabel(app, first.AccountID, "A new device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third != "A new device 3" {
+		t.Fatalf("third unnamed device is %q, want \"A new device 3\"", third)
+	}
+}
+
+func TestLegacyDuplicatesStillSave(t *testing.T) {
+	// Every install made before this existed holds several rows reading
+	// "A new device". A unique index over them would refuse to save and the
+	// server would not boot — which is why the check is in the application
+	// and not in the schema. This is that decision, written down.
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "My library", "A new device")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	devices, err := app.FindCollectionByNameOrId(collDevices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		token, err := newToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := core.NewRecord(devices)
+		record.Set("account", account.AccountID)
+		record.Set("token", token)
+		record.Set("label", "A new device")
+		record.Set("revoked", false)
+		if err := app.Save(record); err != nil {
+			t.Fatalf("a duplicate label could not be stored directly: %v", err)
+		}
+	}
+
+	// And the schema still comes up clean over them.
+	if err := ensureSchema(app); err != nil {
+		t.Fatalf("ensureSchema over duplicate labels: %v", err)
 	}
 }

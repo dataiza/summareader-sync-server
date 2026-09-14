@@ -108,6 +108,44 @@ POST /revoke     stop one syncing
 POST /rename     the caller says what it is called
 ```
 
+## The operator's own routes
+
+```
+POST /operator/rename   {device, label}   rename any device on this server
+POST /operator/revoke   {device}          stop any device syncing
+```
+
+`/rename` and `/revoke` above answer a **device** token and act on the caller.
+That is right for a phone renaming itself and useless to whoever runs the
+server: the terminal and the console window are not paired with anything, so
+until now an operator could see every device and change none of them, on a box
+they own.
+
+These two take `SUMMAREADER_OPERATOR_TOKEN` instead, and read the account off
+the device record rather than off the caller — then hand it to the same
+`renameDevice` and `revokeDevice` an ordinary device uses, so the account-scope
+checks inside those stay meaningful instead of bypassed.
+
+**It is deliberately not the metrics token.** That one is read-only — counts,
+ages and who is paired — and is the sort of thing handed to a monitoring system
+and forgotten about. These rename and revoke. Whoever runs the server can
+already stop the process and read the file, so this is not new power; it is the
+same power under a name that says what it does, so a scraper's credential does
+not quietly acquire it. Unset, both routes 404 rather than 401, for the reason
+`/overview` does: a route that answers "unauthorized" has told you it exists.
+
+From a terminal, against a server that is running:
+
+```
+summareader-sync devices list                       [--json]
+summareader-sync devices rename <device-id> <name>  [--json]
+summareader-sync devices revoke <device-id>         [--json]
+```
+
+HTTP rather than opening the database, unlike `first-device`: that one has to
+write before a server exists and the console stops the server to run it, which
+is the right trade exactly once. Renaming a device should not mean a restart.
+
 `/join` is the one route with no `Authorization` header. `/enroll` needs a
 paired device to ask on the new one's behalf, which leaves nothing for a fresh
 install or for somebody who has lost every device — that gap is what this

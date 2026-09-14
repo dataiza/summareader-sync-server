@@ -89,6 +89,71 @@ func createAccount(app core.App, label, deviceLabel string) (*Device, error) {
 	return device, err
 }
 
+// labelTaken says whether another device on this account already answers to
+// a name.
+//
+// Trimmed and folded, because "Phone" and "phone " are the collision people
+// actually hit — two devices whose names differ only in case are two rows a
+// person cannot tell apart in a list, which is the whole point of refusing.
+//
+// ponytail: read-then-write, so two simultaneous enrolments could both pass.
+// Harmless here — the loser is renamed by hand — and a unique index is not an
+// option; see the note on freeLabel.
+func labelTaken(app core.App, accountID, label, exceptDeviceID string) (bool, error) {
+	needle := strings.ToLower(strings.TrimSpace(label))
+	if needle == "" {
+		return false, nil
+	}
+	records := []*core.Record{}
+	err := app.RecordQuery(collDevices).
+		AndWhere(dbx.HashExp{"account": accountID}).
+		All(&records)
+	if err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		if record.Id == exceptDeviceID {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(record.GetString("label"))) == needle {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// freeLabel turns a wanted name into one nothing else answers to.
+//
+// Enrolling and joining number rather than refuse, and that asymmetry is
+// deliberate: the app sends "A new device" whenever nobody typed a name, so a
+// refusal here would fail the second unnamed pairing in a dialogue that has no
+// name field in view — pairing would look broken. There is nobody at a
+// keyboard mid-pairing to read an error. A rename is a person typing, so that
+// refuses and says why.
+//
+// No unique index backs this. Every install made before this existed already
+// holds several rows reading "A new device", and PocketBase refuses to save a
+// collection whose unique index is violated by the rows already in it — the
+// same lesson join_verifier taught, in this same file.
+func freeLabel(app core.App, accountID, want string) (string, error) {
+	taken, err := labelTaken(app, accountID, want, "")
+	if err != nil || !taken {
+		return want, err
+	}
+	for n := 2; n < 1000; n++ {
+		candidate := fmt.Sprintf("%s %d", want, n)
+		taken, err := labelTaken(app, accountID, candidate, "")
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+	// A thousand devices called the same thing is not a case worth a design.
+	return "", ErrLabelTaken
+}
+
 // enrollDevice issues a token for a new device on an existing account.
 //
 // Called by a device that already has one. The QR a user scans during pairing
@@ -104,6 +169,16 @@ func enrollDevice(app core.App, accountID, label string) (*Device, error) {
 	devices, err := app.FindCollectionByNameOrId(collDevices)
 	if err != nil {
 		return nil, err
+	}
+
+	// The caller is expected to have passed the wanted name through freeLabel.
+	// This is the backstop for anything that did not.
+	taken, err := labelTaken(app, accountID, label, "")
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		return nil, ErrLabelTaken
 	}
 
 	record := core.NewRecord(devices)
@@ -170,8 +245,14 @@ func joinDevice(app core.App, proof, label string) (*Device, error) {
 
 	// The same enrolment an existing device would have performed, so a joined
 	// device is an ordinary device: revocable, listable, nothing special about
-	// how it got here.
-	return enrollDevice(app, record.Id, label)
+	// how it got here — including the name being made free rather than
+	// refused, since a device joining from a typed code has even less of a
+	// person watching than one being paired.
+	free, err := freeLabel(app, record.Id, label)
+	if err != nil {
+		return nil, err
+	}
+	return enrollDevice(app, record.Id, free)
 }
 
 // listDevices returns an account's devices, without their tokens.
@@ -237,6 +318,15 @@ func renameDevice(app core.App, accountID, deviceID, label string) error {
 	// revokeDevice is: an id from one account must not reach another's rows.
 	if record.GetString("account") != accountID {
 		return fmt.Errorf("no such device on this account")
+	}
+	// Excluding itself, so renaming a device to the name it already has — or
+	// to a different case of it — is not refused as a clash with itself.
+	taken, err := labelTaken(app, accountID, label, deviceID)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return ErrLabelTaken
 	}
 	record.Set("label", label)
 	return app.Save(record)

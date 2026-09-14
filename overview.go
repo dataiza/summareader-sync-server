@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -130,4 +131,36 @@ func collectOverview(app core.App) (overview, error) {
 		})
 	}
 	return out, nil
+}
+
+// operatorToken is the credential the /operator routes want.
+//
+// Deliberately not metricsToken(). That one is read-only — counts, ages and
+// who is paired — and is the sort of thing handed to a monitoring system and
+// forgotten about. These routes rename and revoke devices. The operator can
+// already stop the process and read the file, so this is not new power; it is
+// the same power written down under a name that says what it does, so a
+// scraper's credential does not silently acquire it.
+func operatorToken() string {
+	if token := strings.TrimSpace(os.Getenv("SUMMAREADER_OPERATOR_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(settings.OperatorToken)
+}
+
+// operatorOK answers whether this request carries the operator credential.
+//
+// Off rather than open when no token is set, and 404 rather than 401 for the
+// same reason handleOverview does it: a route that answers "unauthorized" has
+// told you it exists.
+func operatorOK(e *core.RequestEvent) (bool, error) {
+	want := operatorToken()
+	if want == "" {
+		return false, e.NotFoundError("", nil)
+	}
+	token := strings.TrimPrefix(e.Request.Header.Get("Authorization"), "Bearer ")
+	if subtleCompare(strings.TrimSpace(token), want) != 1 {
+		return false, e.UnauthorizedError("", nil)
+	}
+	return true, nil
 }

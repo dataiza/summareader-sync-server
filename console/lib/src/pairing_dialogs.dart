@@ -10,39 +10,42 @@ import 'server.dart';
 
 /// The shell both pairing dialogs sit in, so they read as pages of this
 /// console rather than as whatever the platform's dialog looks like.
-Future<void> _show(BuildContext context, String title, Widget body) =>
-    showDialog<void>(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Ar.bg,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Ar.radiusLg),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(26, 26, 26, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(title, style: Ar.headingStyle(22, forText: title)),
-                const SizedBox(height: 16),
-                body,
-                const SizedBox(height: 20),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: PrimaryButton(
-                    label: 'Done',
-                    onTap: () => Navigator.of(context).pop(),
-                  ),
-                ),
-              ],
+Future<void> showConsoleDialog(
+  BuildContext context,
+  String title,
+  Widget body,
+) => showDialog<void>(
+  context: context,
+  builder: (context) => Dialog(
+    backgroundColor: Ar.bg,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(Ar.radiusLg),
+    ),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(26, 26, 26, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title, style: Ar.headingStyle(22, forText: title)),
+            const SizedBox(height: 16),
+            body,
+            const SizedBox(height: 20),
+            Align(
+              alignment: Alignment.centerRight,
+              child: PrimaryButton(
+                label: 'Done',
+                onTap: () => Navigator.of(context).pop(),
+              ),
             ),
-          ),
+          ],
         ),
       ),
-    );
+    ),
+  ),
+);
 
 /// Puts the token somewhere it can be selected and copied, and beside it the
 /// same token as a QR code.
@@ -59,7 +62,7 @@ Future<void> showFirstDeviceToken(
 ) {
   final (_, port) = splitBind(addr);
   final hosts = pairingHosts(addr, lan);
-  return _show(
+  return showConsoleDialog(
     context,
     'Paste this into SummaReader',
     _TokenBody(device: device, hosts: hosts, port: port),
@@ -214,7 +217,7 @@ Future<void> showAddDevice(
       "  -H 'Authorization: Bearer <a token this account already has>' \\\n"
       '  -d \'{"label":"Phone"}\'';
 
-  return _show(
+  return showConsoleDialog(
     context,
     'Add a device',
     Column(

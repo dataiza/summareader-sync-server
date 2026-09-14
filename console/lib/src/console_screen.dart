@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
+import 'package:summareader_ui/summareader_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'addresses.dart';
@@ -252,6 +253,98 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     await _refresh();
   }
 
+  /// Renames a device from the operator's side.
+  ///
+  /// The server refuses a name another device on the same library already
+  /// answers to, and that refusal is the one worth showing rather than
+  /// swallowing — it is the whole reason somebody is renaming.
+  Future<void> _renameDevice(PairedDevice device) async {
+    final controller = TextEditingController(text: device.label);
+    String? problem;
+    await showConsoleDialog(
+      context,
+      'Rename this device',
+      StatefulBuilder(
+        builder: (context, setInner) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'What the other devices will see this one called.',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.7)),
+            ),
+            const SizedBox(height: 12),
+            ArField(controller: controller, background: Ar.neutral100),
+            if (problem != null) ...[
+              const SizedBox(height: 10),
+              Text(problem!, style: Ar.bodyStyle(13)),
+            ],
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                PillButton(
+                  label: 'Rename',
+                  onTap: () async {
+                    final failed = await _server.rename(
+                      device.id,
+                      controller.text.trim(),
+                    );
+                    if (failed == null) {
+                      if (context.mounted) Navigator.of(context).pop();
+                      await _refresh();
+                      return;
+                    }
+                    setInner(() => problem = failed);
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Stops a device syncing, after saying what that does and does not do.
+  Future<void> _revokeDevice(PairedDevice device) async {
+    final name = device.label.isEmpty ? device.id : device.label;
+    await showConsoleDialog(
+      context,
+      'Stop $name syncing?',
+      Builder(
+        builder: (dialogContext) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'It will not be able to sync again without being paired afresh.\n\n'
+              'What it already downloaded stays on it. It holds its own copy of '
+              'the key, and nothing here can reach that — stopping a device is '
+              'about this server, not about the device.',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.7), height: 1.55),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                PillButton(
+                  label: 'Stop it',
+                  onTap: () async {
+                    final navigator = Navigator.of(dialogContext);
+                    await _server.revoke(device.id);
+                    navigator.pop();
+                    await _refresh();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ConsoleView(
     state: _state,
@@ -268,6 +361,8 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       );
     },
     onAtLogin: _setAtLogin,
+    onRename: _renameDevice,
+    onRevoke: _revokeDevice,
     onRunAs: _setRunAs,
   );
 }

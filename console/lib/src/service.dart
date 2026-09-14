@@ -73,6 +73,9 @@ String renderUnit(ServiceConfig c) {
   b.writeln('[Service]');
   if (c.token.isNotEmpty) {
     b.writeln('Environment="SUMMAREADER_METRICS_TOKEN=${c.token}"');
+    // Both names, one value — see the note in server.dart. The unit is the
+    // console's own server, so the console is the operator of it.
+    b.writeln('Environment="SUMMAREADER_OPERATOR_TOKEN=${c.token}"');
   }
 
   final compose = c.compose;
