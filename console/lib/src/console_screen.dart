@@ -274,7 +274,16 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
   Future<void> _pair() async {
     if (_state.devices > 0) {
-      await showAddDevice(context, _state.devices, _server.addr, _lan);
+      // A code rather than a curl line to copy. It carries no key — the
+      // server has never held one — so the dialog says which case it is for.
+      final device = await _server.enrol('A new device');
+      if (!mounted) return;
+      if (device == null) {
+        await showAddDevice(context, _state.devices, _server.addr, _lan);
+        return;
+      }
+      await showDeviceCode(context, device, _server.addr, _lan);
+      await _refresh();
       return;
     }
     try {

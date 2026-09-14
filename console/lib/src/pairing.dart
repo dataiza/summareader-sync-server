@@ -23,8 +23,10 @@ String pairingPayload(String serverUrl, String token) =>
 ///
 /// With no devices there is no library and one has to be made from here,
 /// because until a device has a token there is nobody to authorise the
-/// request. With devices, the library exists and the key that makes it
-/// readable lives on those devices — so the honest answer is an explanation,
-/// not another library.
+/// request. With devices, the library exists — so what this issues is a token
+/// into *that* library, never a second one, and the code it draws carries no
+/// key because the server has never held one. That makes it the answer for a
+/// device coming back to a library it already has, and not the answer for one
+/// that has never seen it.
 String pairButtonText(int devices) =>
     devices > 0 ? 'Add a device' : 'Create first device';

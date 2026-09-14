@@ -69,16 +69,48 @@ Future<void> showFirstDeviceToken(
   );
 }
 
+/// A code for a device being let back in.
+///
+/// The same code as the first device's, drawn the same way, under copy that
+/// says what it does and does not carry. This button used to print a `curl`
+/// line for somebody to copy into a terminal, on the reasoning that a code
+/// from here would be useless without the key — which is true of a device
+/// that has never held the key, and not true of one that has. Re-pairing a
+/// device after a server was rebuilt needs exactly this and nothing else.
+Future<void> showDeviceCode(
+  BuildContext context,
+  FirstDevice device,
+  String addr,
+  List<LanAddr> lan,
+) {
+  final (_, port) = splitBind(addr);
+  return showConsoleDialog(
+    context,
+    'For a device that already has this library',
+    _TokenBody(
+      device: device,
+      hosts: pairingHosts(addr, lan),
+      port: port,
+      keyless: true,
+    ),
+  );
+}
+
 class _TokenBody extends StatefulWidget {
   const _TokenBody({
     required this.device,
     required this.hosts,
     required this.port,
+    this.keyless = false,
   });
 
   final FirstDevice device;
   final List<LanAddr> hosts;
   final String port;
+
+  /// Whether to say that this code carries no key. True for every device
+  /// after the first, where it is the one thing worth being clear about.
+  final bool keyless;
 
   @override
   State<_TokenBody> createState() => _TokenBodyState();
@@ -104,6 +136,18 @@ class _TokenBodyState extends State<_TokenBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (widget.keyless) ...[
+          Text(
+            'This code carries an address and a token. It does not carry the '
+            'key — this server has never held one, and cannot.\n\n'
+            'So it lets a device back in that already has this library: one '
+            'whose server was rebuilt, or that was stopped and is coming '
+            'back. A device that has never seen this library still needs a '
+            'code from an app that has.',
+            style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.55),
+          ),
+          const SizedBox(height: 16),
+        ],
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -253,6 +253,42 @@ class SyncServer {
   Future<String?> remove(String deviceId) =>
       _post('/operator/remove', {'device': deviceId});
 
+  /// Enrols another device and hands back its token.
+  ///
+  /// The code this produces carries somewhere to sync and something to
+  /// authenticate with, and no key — the server has never held one. That is
+  /// enough for a device that already holds this library's key and is being
+  /// let back in, and not enough for one that has never seen it. The dialog
+  /// says which.
+  Future<FirstDevice?> enrol(String label) async {
+    final body = await _postJson('/operator/enroll', {'label': label});
+    if (body == null) return null;
+    return FirstDevice.fromJson(body);
+  }
+
+  Future<Map<String, dynamic>?> _postJson(
+    String path,
+    Map<String, String> body,
+  ) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final request = await client.postUrl(Uri.parse('http://$addr$path'));
+      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(body));
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      final text = await response.transform(utf8.decoder).join();
+      if (response.statusCode != HttpStatus.ok) return null;
+      return jsonDecode(text) as Map<String, dynamic>;
+    } on Exception {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// Null when it worked, otherwise a sentence to show.
   Future<String?> _post(String path, Map<String, String> body) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);

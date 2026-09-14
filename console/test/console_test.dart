@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:summareader_sync_console/src/service.dart';
 
 void main() {
   _deviceControls();
+  _serverIssuedCode();
 
   // The unit file is written by the console and read by systemd, and nothing
   // in between ever looks at it. A wrong ExecStart is a service that fails at
@@ -386,6 +388,29 @@ void _deviceControls() {
       // Whichever state it is in: a device worth forgetting is usually one
       // that was stopped first.
       expect(find.text('Remove'), findsOneWidget);
+    });
+  });
+}
+
+void _serverIssuedCode() {
+  group('the code the server can draw', () {
+    test('carries an address and a token, and no key', () {
+      // The server has never held a key and cannot put one in. What it can do
+      // is save somebody typing an address and a token, which is exactly what
+      // the app accepts a keyless code for.
+      final decoded =
+          jsonDecode(pairingPayload('http://10.0.0.2:8099', 'a-token'))
+              as Map<String, dynamic>;
+
+      expect(decoded['server'], 'http://10.0.0.2:8099');
+      expect(decoded['device_token'], 'a-token');
+      expect(decoded.containsKey('master_key'), isFalse);
+      expect(decoded.containsKey('k'), isFalse);
+    });
+
+    test('the button says which of the two questions it is answering', () {
+      expect(pairButtonText(0), 'Create first device');
+      expect(pairButtonText(3), 'Add a device');
     });
   });
 }

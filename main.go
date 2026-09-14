@@ -211,6 +211,7 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/operator/revoke", handleOperatorRevoke)
 	e.Router.POST("/operator/resume", handleOperatorResume)
 	e.Router.POST("/operator/remove", handleOperatorRemove)
+	e.Router.POST("/operator/enroll", handleOperatorEnroll)
 
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
@@ -822,6 +823,72 @@ func handleOperatorResume(e *core.RequestEvent) error {
 
 func handleOperatorRemove(e *core.RequestEvent) error {
 	return operatorOnDevice(e, "could not remove that device", removeDevice)
+}
+
+type operatorEnrollRequest struct {
+	Account string `json:"account"`
+	Label   string `json:"label"`
+}
+
+// Issues a token, on the operator's credential rather than a device's.
+//
+// This was left out on the reasoning that a token minted here is useless
+// because the server has never held the key — which is true of a device that
+// has never held it either, and false of one that has. A device re-joining a
+// library it already holds the key for needs exactly this and nothing else:
+// somewhere to sync and something to authenticate with. The app has always
+// accepted a code carrying those two and no key.
+//
+// So it exists, and the window that shows the code says plainly which of the
+// two cases it is for. A device that has never seen this library still needs
+// a code from an app that has.
+func handleOperatorEnroll(e *core.RequestEvent) error {
+	if ok, err := operatorOK(e); !ok {
+		return err
+	}
+
+	var body operatorEnrollRequest
+	_ = e.BindBody(&body)
+	if body.Label == "" {
+		body.Label = "A new device"
+	}
+
+	account := strings.TrimSpace(body.Account)
+	if account == "" {
+		// The ordinary case: one library on the machine, and naming it would
+		// be a thing to look up before pressing a button.
+		accounts := []*core.Record{}
+		if err := e.App.RecordQuery(collAccounts).Limit(2).All(&accounts); err != nil {
+			return e.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "unavailable",
+			})
+		}
+		if len(accounts) == 0 {
+			return e.JSON(http.StatusNotFound, map[string]string{
+				"error": "there is no library on this server yet",
+			})
+		}
+		if len(accounts) > 1 {
+			return e.JSON(http.StatusConflict, map[string]string{
+				"error": "more than one library here — say which",
+			})
+		}
+		account = accounts[0].Id
+	}
+
+	label, err := freeLabel(e.App, account, body.Label)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not enrol",
+		})
+	}
+	device, err := enrollDevice(e.App, account, label)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not enrol",
+		})
+	}
+	return e.JSON(http.StatusOK, device)
 }
 
 func handleListDevices(e *core.RequestEvent) error {

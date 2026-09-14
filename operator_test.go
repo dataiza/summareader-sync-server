@@ -234,3 +234,39 @@ func TestTheNameIsNotTheIdentity(t *testing.T) {
 		t.Fatal("two servers sharing a name share an identity")
 	}
 }
+
+func TestTheOperatorCanIssueATokenIntoTheOneLibrary(t *testing.T) {
+	// Not a second library — the mistake this button used to make. A token
+	// into the account that is already there, which is what a device coming
+	// back to a library it already holds the key for needs.
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := listDevices(app, account.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := enrollDevice(app, account.AccountID, "Coming back")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.AccountID != account.AccountID {
+		t.Fatal("issued a token into a different library")
+	}
+
+	after, err := listDevices(app, account.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before)+1 {
+		t.Fatalf("devices went from %d to %d", len(before), len(after))
+	}
+	// And it works, which is the whole point of issuing it.
+	if _, _, err := accountForToken(app, issued.Token); err != nil {
+		t.Fatalf("the issued token does not resolve: %v", err)
+	}
+}

@@ -115,7 +115,19 @@ POST /operator/rename   {device, label}   rename any device on this server
 POST /operator/revoke   {device}          stop any device syncing, reversibly
 POST /operator/resume   {device}          let a stopped device sync again
 POST /operator/remove   {device}          forget a device entirely
+POST /operator/enroll   {label}           issue a token into the one library
 ```
+
+`/operator/enroll` was deliberately absent, on the reasoning that a token
+minted here is useless because this server has never held the key. That is
+true of a device which has never held the key either, and false of one that
+has — and the second case is the common one: a server rebuilt, a device
+stopped and coming back. The app has always accepted a pairing code carrying
+an address and a token and no key, so the window draws one, and says plainly
+which of the two cases it is for.
+
+It enrols into the account already on the server and never creates a second
+one, which is the mistake the pair button used to make.
 
 Stopping and removing are different things and the difference is worth stating:
 a stopped device keeps its row, its name and its token, and `resume` puts it
