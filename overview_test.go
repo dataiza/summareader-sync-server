@@ -73,3 +73,42 @@ func TestOverviewCountsAndLists(t *testing.T) {
 		t.Fatal("a revoked device must still be listed, and say so")
 	}
 }
+
+func TestEveryServerHasAnIdentityOfItsOwn(t *testing.T) {
+	// It used to answer with PocketBase's Meta.AppName, which nothing here
+	// sets — so every install said "Acme" and no client could tell one server
+	// from another, which is the whole job of the endpoint.
+	first, _ := newTestApp(t)
+	second, _ := newTestApp(t)
+
+	a := instanceId(first)
+	b := instanceId(second)
+
+	if a == "" || b == "" {
+		t.Fatal("a server with no identity cannot be told apart from any other")
+	}
+	if a == b {
+		t.Fatalf("two databases share the identity %q", a)
+	}
+	if a == "Acme" || b == "Acme" {
+		t.Fatal("the display name is not an identity")
+	}
+}
+
+func TestTheIdentitySurvivesABoot(t *testing.T) {
+	// It has to be stable, or every launch looks to a client like a different
+	// server and asks whether to merge.
+	app, _ := newTestApp(t)
+	before := instanceId(app)
+
+	if err := ensureSchema(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSchema(app); err != nil {
+		t.Fatal(err)
+	}
+
+	if after := instanceId(app); after != before {
+		t.Fatalf("identity changed from %q to %q across a boot", before, after)
+	}
+}

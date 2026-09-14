@@ -12,6 +12,7 @@ import (
 // outside the sync path, so the sync path never needs to know who anyone is.
 const (
 	collAccounts = "accounts"
+	collServer   = "server"
 	collEntries  = "log_entries"
 	collBlobs    = "blobs"
 	collDevices  = "devices"
@@ -32,7 +33,67 @@ func ensureSchema(app core.App) error {
 	if err := ensureBlobs(app); err != nil {
 		return err
 	}
-	return ensureDevices(app)
+	if err := ensureDevices(app); err != nil {
+		return err
+	}
+	return ensureInstanceId(app)
+}
+
+// A name for this database that no other database shares.
+//
+// `/instance` used to answer with PocketBase's `Meta.AppName`, which nothing
+// here ever sets — so every sync server in existence introduced itself as
+// "Acme". That is the default, and it made the endpoint unable to do the one
+// job it exists for: telling a client that it is talking to a *different*
+// server rather than to its own with everything deleted. Recreate the
+// database, restore somebody else's, point at a colleague's machine, and the
+// client saw the same identity and carried on — collecting 401s it had no way
+// to explain, because as far as it knew nothing had changed.
+//
+// Generated once, stored, and never derived from anything an operator can
+// edit. The display name stays theirs to set; this is not a name, it is an
+// identity, in the same way a device token is not a label.
+func ensureInstanceId(app core.App) error {
+	if existing, err := app.FindCollectionByNameOrId(collServer); err == nil {
+		records := []*core.Record{}
+		if err := app.RecordQuery(collServer).Limit(1).All(&records); err != nil {
+			return err
+		}
+		if len(records) > 0 && records[0].GetString("instance") != "" {
+			return nil
+		}
+		return writeInstanceId(app, existing)
+	}
+
+	c := core.NewBaseCollection(collServer)
+	c.Fields.Add(&core.TextField{Name: "instance", Required: true, Max: 100})
+	if err := app.Save(c); err != nil {
+		return err
+	}
+	return writeInstanceId(app, c)
+}
+
+func writeInstanceId(app core.App, collection *core.Collection) error {
+	id, err := newToken()
+	if err != nil {
+		return err
+	}
+	record := core.NewRecord(collection)
+	record.Set("instance", id)
+	return app.Save(record)
+}
+
+// instanceId is what /instance answers with. Empty only if the row is somehow
+// missing, which the handler treats as a server that cannot identify itself.
+func instanceId(app core.App) string {
+	records := []*core.Record{}
+	if err := app.RecordQuery(collServer).Limit(1).All(&records); err != nil {
+		return ""
+	}
+	if len(records) == 0 {
+		return ""
+	}
+	return records[0].GetString("instance")
 }
 
 // The storage ceiling, in bytes. Zero — the default for every account this

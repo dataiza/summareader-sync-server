@@ -498,9 +498,11 @@ func handleWipe(e *core.RequestEvent) error {
 // account from a different server. Without it, pointing at a fresh instance
 // looks identical to "everything was deleted".
 func handleInstance(e *core.RequestEvent) error {
-	settings := e.App.Settings()
+	// The stored identity, not the display name. See ensureInstanceId: the
+	// display name is "Acme" on every install nobody has renamed, which made
+	// every server claim to be the same one as every other.
 	return e.JSON(http.StatusOK, map[string]string{
-		"instance": settings.Meta.AppName,
+		"instance": instanceId(e.App),
 		"software": "summareader-sync-server",
 	})
 }
