@@ -54,6 +54,21 @@ class _HoverableState extends State<Hoverable> {
     );
   }
 
+  /// A control's own words, taken out of the page's selection.
+  ///
+  /// The whole app body is wrapped in one `SelectionArea` so the article, the
+  /// summary and the transcript can be copied. That makes every `Text` inside
+  /// it selectable — including the label on a button, which puts a text cursor
+  /// at the leaf, *under* the pointer this widget sets a few nodes up. So a
+  /// button read as a piece of prose: an I-beam over the word, a hand over the
+  /// padding beside it.
+  ///
+  /// Only where there is something to press. A [Hoverable] with no `onTap` is
+  /// wrapping content rather than a control, and that content should stay
+  /// selectable.
+  Widget _unselectable(Widget child) =>
+      widget.onTap == null ? child : SelectionContainer.disabled(child: child);
+
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
@@ -73,13 +88,17 @@ class _HoverableState extends State<Hoverable> {
           child: GestureDetector(
             onTap: widget.onTap,
             behavior: HitTestBehavior.opaque,
-            child: _sized(context, widget.builder(context, _hovered)),
+            child: _unselectable(
+              _sized(context, widget.builder(context, _hovered)),
+            ),
           ),
         ),
         null => GestureDetector(
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
-          child: _sized(context, widget.builder(context, _hovered)),
+          child: _unselectable(
+            _sized(context, widget.builder(context, _hovered)),
+          ),
         ),
       },
     );
