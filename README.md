@@ -234,3 +234,16 @@ Dropping a device's token stops it syncing. Whatever it already downloaded
 stays readable, because it still holds its own copy of the master key. There is
 no key rotation and no re-encryption pass — those would mean re-encrypting the
 whole library. The client copy says exactly this and no more.
+
+## Licence
+
+GNU Affero General Public License, version 3 — the full text is in `LICENSE`,
+and it ships inside every download.
+
+Section 13 is the one that matters for a server: run a **modified** version
+where other people can reach it over a network, and those people are entitled
+to its source. Running an unmodified build puts no obligation on you.
+
+This is not the licence SummaReader itself carries. The app is a separate,
+proprietary program; it speaks to this over a network protocol and links none
+of its code.
