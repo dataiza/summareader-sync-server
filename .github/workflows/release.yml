@@ -21,6 +21,13 @@ on:
   push:
     tags: ['v*']
 
+# **GitHub-hosted runners, deliberately.** This repository is public, so
+# standard hosted runners cost nothing — which removes the only reason to point
+# it at hardware. The self-hosted runners belong to the app repository alone:
+# they are registered to a personal account and cannot be shared, and a
+# self-hosted runner on a public repository would let a fork's pull request run
+# arbitrary code on that machine.
+
 # Deliberately no `concurrency` group: a release build must never be cancelled
 # by whatever is pushed next.
 
@@ -31,7 +38,7 @@ jobs:
   # later.
   open:
     name: Open the release
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -99,7 +106,7 @@ jobs:
   headless:
     name: Headless bundles
     needs: open
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     timeout-minutes: 30
@@ -143,9 +150,9 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+            runner: ubuntu-latest
           - os: macos
-            runner: ${{ vars.RUNNER_MACOS || 'macos-latest' }}
+            runner: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -187,7 +194,7 @@ jobs:
     name: Publish
     needs: [open, headless, console]
     if: github.ref_type == 'tag'
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
