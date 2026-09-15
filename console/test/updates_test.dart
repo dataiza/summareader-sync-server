@@ -286,4 +286,53 @@ void main() {
       );
     });
   });
+
+  group('the two spellings of the entry', () {
+    late Directory home;
+
+    setUp(() => home = Directory.systemTemp.createTempSync('spelling'));
+    tearDown(() => home.deleteSync(recursive: true));
+
+    test('what is installed says the same as what is in the image', () async {
+      // There are two copies of this entry: the one packed into the AppImage
+      // (scripts/appimage/sk.dataiza.summareader_sync_console.desktop) and the one
+      // addToMenu writes, which differs only in Exec naming an absolute path.
+      //
+      // Nothing enforced that until this test, and the comment warning about
+      // it was already in the file when the MCP console shipped a menu entry
+      // reading "SummaReader Sync Server" — ported from its sibling with the
+      // application id replaced and the four display strings left alone.
+      await addToMenu(
+        '/home/you/X.AppImage',
+        environment: {'HOME': home.path, 'XDG_DATA_HOME': ''},
+      );
+      final written = File(
+        '${home.path}/.local/share/applications/sk.dataiza.summareader_sync_console.desktop',
+      ).readAsLinesSync();
+      final packed = File(
+        '../scripts/appimage/sk.dataiza.summareader_sync_console.desktop',
+      ).readAsLinesSync();
+
+      for (final key in const [
+        'Name',
+        'GenericName',
+        'Comment',
+        'Icon',
+        'Categories',
+        'Keywords',
+        'StartupWMClass',
+      ]) {
+        String? valueIn(List<String> lines) => lines
+            .where((line) => line.startsWith('$key='))
+            .map((line) => line.substring(key.length + 1))
+            .firstOrNull;
+
+        expect(
+          valueIn(written),
+          valueIn(packed),
+          reason: '$key differs between the installed entry and the packed one',
+        );
+      }
+    });
+  });
 }
