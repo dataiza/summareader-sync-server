@@ -12,6 +12,7 @@ import 'package:summareader_sync_console/src/server.dart';
 import 'package:summareader_sync_console/src/service.dart';
 
 void main() {
+  _theTwoPages();
   _deviceControls();
   _serverIssuedCode();
 
@@ -411,6 +412,68 @@ void _serverIssuedCode() {
     test('the button says which of the two questions it is answering', () {
       expect(pairButtonText(0), 'Create first device');
       expect(pairButtonText(3), 'Add a device');
+    });
+  });
+}
+
+void _theTwoPages() {
+  group('the window and what the menu keeps off it', () {
+    // Linux and a binary present, which is the only state in which every
+    // control this checks for is drawn at all.
+    const state = ConsoleState(
+      dir: '/data',
+      addr: '127.0.0.1:8099',
+      serverBinary: '/bin/summareader-sync',
+    );
+
+    Future<void> pumpConsole(WidgetTester tester) => tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: ConsoleView(state: state)),
+      ),
+    );
+
+    testWidgets('the window is Status and Devices', (tester) async {
+      await pumpConsole(tester);
+
+      expect(find.text('Status'), findsOneWidget);
+      expect(find.text('Devices'), findsOneWidget);
+      // The sections that were a form: they are still reachable, just not in
+      // the way of the two questions the window is opened to answer.
+      expect(find.text('How it is reached'), findsNothing);
+      expect(find.text('Start at login'), findsNothing);
+      // What is pressed rather than read stays with the card it acts on.
+      expect(find.text('Start'), findsOneWidget);
+      expect(find.text('Open dashboard'), findsOneWidget);
+      expect(find.text('Create first device'), findsOneWidget);
+    });
+
+    testWidgets('the menu reaches everything that moved', (tester) async {
+      await pumpConsole(tester);
+
+      await tester.tap(find.text('Menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings').last);
+      await tester.pumpAndSettle();
+
+      // Nothing was cut on the way across: the name, the address, the port,
+      // the directory and the service are all on the page the menu opens.
+      for (final moved in [
+        'How it is reached',
+        'Name',
+        'Bind address',
+        'Port',
+        'Data directory',
+        '/data',
+        'Start at login',
+        'Keep it running',
+      ]) {
+        expect(find.text(moved), findsWidgets, reason: moved);
+      }
+      expect(find.text('Devices'), findsNothing);
+
+      await tester.tap(find.text('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Devices'), findsOneWidget);
     });
   });
 }

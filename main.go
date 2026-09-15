@@ -1,9 +1,12 @@
 // Command summareader-sync-server is the one sync implementation.
 //
-// Self-hosted for free and hosted as the paid tier are the same binary with a
-// different URL — there is no "cloud edition". That is only sustainable
-// because the server is deliberately incapable: it stores opaque ciphertext
-// against sequence numbers and never learns what any of it means.
+// There is one deployment: the one somebody runs themselves. No cloud edition,
+// and no hosted service to sign up for — the app says so publicly, and this
+// comment said the opposite for long enough to be worth correcting out loud.
+//
+// That is only sustainable because the server is deliberately incapable: it
+// stores opaque ciphertext against sequence numbers and never learns what any
+// of it means.
 package main
 
 import (

@@ -108,11 +108,12 @@ class ConsoleState {
       '${megabytes(bytes)}';
 }
 
-/// The console's body.
+/// The console's body: Status and Devices, with everything that is set rather
+/// than watched behind the menu in the top bar.
 ///
 /// Built from [ConsoleState] and a set of callbacks, with nothing in it that
 /// starts a process or reads a socket — see the class comment there.
-class ConsoleView extends StatelessWidget {
+class ConsoleView extends StatefulWidget {
   const ConsoleView({
     super.key,
     required this.state,
@@ -140,7 +141,8 @@ class ConsoleView extends StatelessWidget {
   final ValueChanged<bool>? onRunAs;
   // The list was read-only: an operator could see every device and could not
   // rename or stop one, on a server they run. The dialogs live in the screen
-  // because this widget has no state to hold a confirmation in.
+  // because each of them talks to the server; the only thing this widget
+  // remembers is which of its two pages is up.
   final ValueChanged<PairedDevice>? onRename;
   final ValueChanged<PairedDevice>? onRevoke;
   final ValueChanged<PairedDevice>? onResume;
@@ -148,42 +150,144 @@ class ConsoleView extends StatelessWidget {
   final ValueChanged<String>? onName;
 
   @override
-  Widget build(BuildContext context) {
-    const title = 'SummaReader Sync Server';
-    return SingleChildScrollView(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(26, 30, 26, 60),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: Ar.headingStyle(32, forText: title)),
-                const SizedBox(height: 6),
-                Text(
-                  'Your own library, on your own machine. Nothing here can '
-                  'read what it holds.',
-                  style: Ar.bodyStyle(13.5, color: Ar.dim(0.6)),
-                ),
-                const SizedBox(height: 26),
-                // Four sections by subject rather than one card of
-                // everything: what is true right now, what you press to
-                // change it, who is paired with it, and how it is reached.
-                // Start, the dashboard and pairing were all inside "Status",
-                // which is a heading about none of them.
-                _status(context),
-                _running(),
-                _devices(),
-                _address(),
-                if (state.linux) _atLogin(),
-              ],
-            ),
+  State<ConsoleView> createState() => _ConsoleViewState();
+}
+
+/// The one thing the console's body remembers: which of its two pages is up.
+///
+/// A pushed route would have been less code, but the page it pushes is built
+/// from the poll that pushed it — two seconds later the switch, the address
+/// list and the last error on it are a snapshot of a window that has moved on.
+/// Swapping the body in place keeps Settings on the same heartbeat as
+/// everything else here.
+class _ConsoleViewState extends State<ConsoleView> {
+  bool _settings = false;
+
+  ConsoleState get state => widget.state;
+
+  @override
+  Widget build(BuildContext context) =>
+      _settings ? _settingsPage() : _mainPage();
+
+  /// The window: what is true right now, and who is paired with it.
+  ///
+  /// It was five sections deep, and the three that were neither status nor
+  /// devices were mostly a form — the name, the port, the bind address, the
+  /// service. Those are set once and watched from here afterwards, so they
+  /// moved behind the menu and this page answers the question somebody opened
+  /// the window with.
+  Widget _mainPage() => _page([
+    _topBar(
+      'SummaReader Sync Server',
+      'Your own library, on your own machine. Nothing here can read what it '
+          'holds.',
+      trailing: _menu(),
+    ),
+    _status(),
+    _devices(),
+  ]);
+
+  Widget _settingsPage() => _page([
+    _topBar(
+      'Settings',
+      'What the server is called, where it listens, and whether it comes back '
+          'after a reboot.',
+      leading: PillButton(
+        label: 'Back',
+        icon: Icons.arrow_back,
+        height: 36,
+        onTap: () => setState(() => _settings = false),
+      ),
+    ),
+    // The same failure report the Status card carries, because rebinding and
+    // installing a service are both done from this page and both can fail —
+    // and a message that only appears on the page this one is covering is a
+    // message nobody reads.
+    if (state.error case final message?)
+      Padding(
+        padding: const EdgeInsets.only(bottom: 22),
+        child: _card([
+          Text(
+            message,
+            style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
+          ),
+        ]),
+      ),
+    _address(),
+    if (state.linux) _atLogin(),
+  ]);
+
+  /// The single column both pages are drawn in, at a width a paragraph is
+  /// still readable at.
+  Widget _page(List<Widget> children) => SingleChildScrollView(
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(26, 30, 26, 60),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children,
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+
+  /// The title, the line under it, and whatever the page hangs either side of
+  /// them: the menu on the window, Back on Settings.
+  Widget _topBar(
+    String title,
+    String blurb, {
+    Widget? leading,
+    Widget? trailing,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 26),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (leading != null) ...[
+          Padding(padding: const EdgeInsets.only(top: 6), child: leading),
+          const SizedBox(width: 14),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Ar.headingStyle(32, forText: title)),
+              const SizedBox(height: 6),
+              Text(blurb, style: Ar.bodyStyle(13.5, color: Ar.dim(0.6))),
+            ],
+          ),
+        ),
+        if (trailing != null) ...[
+          const SizedBox(width: 14),
+          Padding(padding: const EdgeInsets.only(top: 6), child: trailing),
+        ],
+      ],
+    ),
+  );
+
+  /// The top bar's menu.
+  ///
+  /// Material's own rather than the design package's: that package draws
+  /// buttons, fields and switches and has never held a menu, and it is a copy
+  /// of the app's kept byte-identical, so one cannot be added from this side.
+  Widget _menu() => MenuAnchor(
+    menuChildren: [
+      MenuItemButton(
+        leadingIcon: const Icon(Icons.tune, size: 18),
+        onPressed: () => setState(() => _settings = true),
+        child: Text('Settings', style: Ar.bodyStyle(14)),
+      ),
+    ],
+    builder: (context, controller, _) => PillButton(
+      label: 'Menu',
+      icon: Icons.menu,
+      height: 36,
+      onTap: () => controller.isOpen ? controller.close() : controller.open(),
+    ),
+  );
 
   // The section shape the app uses everywhere: a heading, a line saying what
   // the group is for, and one card of rows.
@@ -249,93 +353,90 @@ class ConsoleView extends StatelessWidget {
     );
   }
 
-  Widget _status(BuildContext context) {
+  Widget _status() {
     final missing = state.serverBinary == null;
     return _section(
       'Status',
       'Whether the server is up, where it is, and who is running it.',
-      _card([
-        Row(
-          children: [
-            // A dot rather than the word: the state is read at a glance from
-            // across a desk, and the address beside it is what has to be read
-            // properly.
-            Container(
-              width: 10,
-              height: 10,
-              margin: const EdgeInsets.only(right: 10),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: state.running ? Ar.accent2500 : Ar.neutral400,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _card([
+            Row(
+              children: [
+                // A dot rather than the word: the state is read at a glance from
+                // across a desk, and the address beside it is what has to be read
+                // properly.
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(right: 10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: state.running ? Ar.accent2500 : Ar.neutral400,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    state.statusLine,
+                    style: Ar.bodyStyle(15, weight: FontWeight.w600),
+                  ),
+                ),
+                // Which of the two is running it, said out loud: with a unit
+                // installed, Start and Stop drive systemctl, and somebody who does
+                // not know that has no way to find out.
+                if (state.managed) const Tag(label: 'systemd'),
+              ],
+            ),
+            Text(state.countsLine, style: Ar.bodyStyle(13, color: Ar.dim(0.6))),
+            if (missing)
+              Text(
+                'No summareader-sync beside this console or on PATH. Build one '
+                'with scripts/build.sh, or point SUMMAREADER_SYNC_BIN at it.',
+                style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
               ),
-            ),
-            Expanded(
-              child: Text(
-                state.statusLine,
-                style: Ar.bodyStyle(15, weight: FontWeight.w600),
+            if (state.error case final message?)
+              Text(
+                message,
+                style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
               ),
-            ),
-            // Which of the two is running it, said out loud: with a unit
-            // installed, Start and Stop drive systemctl, and somebody who does
-            // not know that has no way to find out.
-            if (state.managed) const Tag(label: 'systemd'),
-          ],
-        ),
-        Text(state.countsLine, style: Ar.bodyStyle(13, color: Ar.dim(0.6))),
-        if (missing)
-          Text(
-            'No summareader-sync beside this console or on PATH. Build one '
-            'with scripts/build.sh, or point SUMMAREADER_SYNC_BIN at it.',
-            style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
+          ]),
+          const SizedBox(height: 14),
+          // The buttons sit under the card rather than inside it, and under no
+          // heading of their own. They had one — "Running it" — because "Start"
+          // and "Pair a device" beneath a heading that describes a dot and two
+          // counts is a heading about neither. With the settings gone from this
+          // page there is no wrong heading left above them, and what they act on
+          // is the card they sit under.
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              PrimaryButton(
+                label: state.running ? 'Stop' : 'Start',
+                icon: state.running
+                    ? Icons.stop_circle_outlined
+                    : Icons.play_arrow_rounded,
+                onTap: missing ? null : widget.onToggle,
+              ),
+              // PocketBase's admin interface is the real one, and it is served
+              // by the server — so there is nothing to open until it is up.
+              PillButton(
+                label: 'Open dashboard',
+                icon: Icons.open_in_new,
+                height: 40,
+                onTap: state.running ? widget.onDashboard : null,
+              ),
+              PillButton(
+                label: pairButtonText(state.devices),
+                icon: Icons.qr_code_2,
+                height: 40,
+                onTap: widget.onPair,
+              ),
+            ],
           ),
-        if (state.error case final message?)
-          Text(
-            message,
-            style: Ar.bodyStyle(12.5, color: Ar.accent800, height: 1.5),
-          ),
-      ]),
-    );
-  }
-
-  /// The controls, which are not the status.
-  ///
-  /// They shared a card with the running dot and the counts, under a heading
-  /// that describes only those — so "Start" and "Pair a device" lived under
-  /// "Status", which is a word about neither.
-  Widget _running() {
-    final missing = state.serverBinary == null;
-    return _section(
-      'Running it',
-      'Starting and stopping, the dashboard, and letting a device in.',
-      _card([
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            PrimaryButton(
-              label: state.running ? 'Stop' : 'Start',
-              icon: state.running
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_arrow_rounded,
-              onTap: missing ? null : onToggle,
-            ),
-            // PocketBase's admin interface is the real one, and it is served
-            // by the server — so there is nothing to open until it is up.
-            PillButton(
-              label: 'Open dashboard',
-              icon: Icons.open_in_new,
-              height: 40,
-              onTap: state.running ? onDashboard : null,
-            ),
-            PillButton(
-              label: pairButtonText(state.devices),
-              icon: Icons.qr_code_2,
-              height: 40,
-              onTap: onPair,
-            ),
-          ],
-        ),
-      ]),
+        ],
+      ),
     );
   }
 
@@ -396,19 +497,25 @@ class ConsoleView extends StatelessWidget {
           PillButton(
             label: 'Resume',
             height: 32,
-            onTap: onResume == null ? null : () => onResume!(device),
+            onTap: widget.onResume == null
+                ? null
+                : () => widget.onResume!(device),
           ),
         ] else ...[
           PillButton(
             label: 'Rename',
             height: 32,
-            onTap: onRename == null ? null : () => onRename!(device),
+            onTap: widget.onRename == null
+                ? null
+                : () => widget.onRename!(device),
           ),
           const SizedBox(width: 8),
           PillButton(
             label: 'Stop',
             height: 32,
-            onTap: onRevoke == null ? null : () => onRevoke!(device),
+            onTap: widget.onRevoke == null
+                ? null
+                : () => widget.onRevoke!(device),
           ),
         ],
         const SizedBox(width: 8),
@@ -417,7 +524,9 @@ class ConsoleView extends StatelessWidget {
         PillButton(
           label: 'Remove',
           height: 32,
-          onTap: onRemove == null ? null : () => onRemove!(device),
+          onTap: widget.onRemove == null
+              ? null
+              : () => widget.onRemove!(device),
         ),
       ],
     );
@@ -434,7 +543,7 @@ class ConsoleView extends StatelessWidget {
           'Name',
           SizedBox(
             width: 220,
-            child: _NameField(name: state.name, onSubmitted: onName),
+            child: _NameField(name: state.name, onSubmitted: widget.onName),
           ),
         ),
         // Said here because the obvious reading of a name field is the wrong
@@ -456,7 +565,9 @@ class ConsoleView extends StatelessWidget {
                 Segment(
                   label: candidate.toString(),
                   selected: candidate.ip == host,
-                  onTap: onBind == null ? null : () => onBind!(candidate.ip),
+                  onTap: widget.onBind == null
+                      ? null
+                      : () => widget.onBind!(candidate.ip),
                 ),
             ],
           ),
@@ -468,7 +579,7 @@ class ConsoleView extends StatelessWidget {
           'Port',
           SizedBox(
             width: 110,
-            child: _PortField(port: port, onSubmitted: onPort),
+            child: _PortField(port: port, onSubmitted: widget.onPort),
           ),
         ),
         _row(
@@ -494,7 +605,7 @@ class ConsoleView extends StatelessWidget {
         ArSwitch(
           value: state.atLogin,
           label: 'Start at login',
-          onChanged: onAtLogin,
+          onChanged: widget.onAtLogin,
         ),
         hint: 'Writes ~/.config/systemd/user/summareader-sync.service.',
       ),
@@ -503,7 +614,7 @@ class ConsoleView extends StatelessWidget {
           label: 'This binary',
           hint: 'The unit runs summareader-sync serve directly.',
           selected: !state.docker,
-          onTap: onRunAs == null ? null : () => onRunAs!(false),
+          onTap: widget.onRunAs == null ? null : () => widget.onRunAs!(false),
         ),
         RadioRow(
           label: 'docker compose',
@@ -511,7 +622,7 @@ class ConsoleView extends StatelessWidget {
               'The unit brings the container up instead, with the bind '
               'address passed in as SYNC_BIND and SYNC_PORT.',
           selected: state.docker,
-          onTap: onRunAs == null ? null : () => onRunAs!(true),
+          onTap: widget.onRunAs == null ? null : () => widget.onRunAs!(true),
         ),
       ] else
         Text(

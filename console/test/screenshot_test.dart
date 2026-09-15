@@ -73,7 +73,10 @@ void main() {
       ],
     );
 
-    tester.view.physicalSize = const Size(820, 1290);
+    // Shorter than it was: the window is Status and Devices now, and the
+    // settings that made it 1290 tall are behind the menu. The extra height
+    // would be a picture of an empty page below the last device row.
+    tester.view.physicalSize = const Size(820, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
