@@ -100,6 +100,47 @@ Future<String> keepImage(
   }
 }
 
+/// Deletes the image the menu used to name, now that this one has taken its
+/// place.
+///
+/// The case this is for: a newer release downloaded by hand and run out of
+/// ~/Downloads, while the menu still names the copy in ~/Applications. Moving
+/// the new one in and repointing the entry leaves the old one sitting there —
+/// a whole second program that checks GitHub for itself and can be started
+/// from a file manager, one version behind for ever.
+///
+/// Deliberately narrow. Only a file in ~/Applications, only an AppImage, never
+/// the one now named, and never something that is not there any more: this is
+/// clearing away a copy that has been replaced, not deleting whatever a menu
+/// entry happened to point at.
+Future<bool> removeSuperseded(
+  String named,
+  String kept, {
+  Map<String, String>? environment,
+}) async {
+  if (!supersedes(named, kept, environment: environment)) return false;
+  try {
+    await File(named).delete();
+    return true;
+  } on FileSystemException {
+    // Somebody else's file, or a read-only directory. The menu points at the
+    // right one either way, which is the part that matters.
+    return false;
+  }
+}
+
+/// Whether [kept] takes the place of [named] — the question above, asked
+/// before the dialog says what pressing the button will do.
+bool supersedes(
+  String named,
+  String kept, {
+  Map<String, String>? environment,
+}) =>
+    named != kept &&
+    named.endsWith('.AppImage') &&
+    named.startsWith('${applicationsDir(environment)}/') &&
+    File(named).existsSync();
+
 /// Writes the entry and the icons.
 ///
 /// [image] is the AppImage's own path. Pass it through [keepImage] first: the

@@ -62,6 +62,7 @@ Future<String?> askWhereTheLibraryGoes(
         ],
       ),
     ),
+    done: false,
   );
 
   controller.dispose();
@@ -125,6 +126,7 @@ Future<bool> askAboutWhatIsAlreadyThere(
         ],
       ),
     ),
+    done: false,
   );
 
   return deleted;
@@ -219,6 +221,7 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
         ],
       ),
     ),
+    done: false,
   );
 
   return wanted;
@@ -232,20 +235,21 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
 Future<bool> askAboutARepoint(
   BuildContext context,
   String named,
-  String running,
-) async {
+  String running, {
+  String? replacing,
+}) async {
   var wanted = false;
 
   await showConsoleDialog(
     context,
-    'The menu entry points somewhere else',
+    'This is not the copy in your applications menu',
     Builder(
       builder: (dialogContext) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Your applications menu starts this from:',
+            'Your applications menu starts this one:',
             style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
           ),
           const SizedBox(height: 6),
@@ -261,9 +265,20 @@ Future<bool> askAboutARepoint(
             style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
           ),
           const SizedBox(height: 12),
+          // What the button does, rather than what is wrong. Somebody who has
+          // just downloaded a new release and run it wants to be told they are
+          // installing it, and where it is going.
           Text(
-            'If the first one is gone, the icon in your launcher starts '
-            'nothing at all. Pointing it here fixes that.',
+            replacing != null
+                ? 'Moving this one to ~/Applications and starting it from the '
+                      'menu from now on makes it the copy you have installed. '
+                      '$replacing is deleted — it is the same program, one '
+                      'download behind, and two copies each update themselves '
+                      'separately.'
+                : 'Moving this one to ~/Applications and starting it from the '
+                      'menu from now on makes it the copy you have installed. '
+                      'If the entry keeps naming a file that is gone, the icon '
+                      'in your launcher starts nothing at all.',
             style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
           ),
           const SizedBox(height: 18),
@@ -276,7 +291,7 @@ Future<bool> askAboutARepoint(
               ),
               const SizedBox(width: 9),
               PrimaryButton(
-                label: 'Point it here',
+                label: 'Use this one',
                 onTap: () {
                   wanted = true;
                   Navigator.of(dialogContext).pop();
@@ -287,6 +302,7 @@ Future<bool> askAboutARepoint(
         ],
       ),
     ),
+    done: false,
   );
 
   return wanted;

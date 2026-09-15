@@ -108,10 +108,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       atLogin: serviceInstalled(),
       docker: _docker,
       compose: _compose != null,
-      // Both controls exist only for an AppImage: it is the one form that is a
-      // single file this program owns, so replacing it and registering it are
-      // things it can honestly offer to do.
-      updatable: runningImage() != null,
+      updatable: _updatable,
     );
 
     // After the first frame, because a dialog needs a Navigator and there is
@@ -191,6 +188,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         docker: serviceInstalled() ? serviceDocker() : _docker,
         compose: _compose != null,
         error: _state.error,
+        // Rebuilt here every two seconds, so anything left out of this list is
+        // a thing that shows at launch and disappears. Check for updates did
+        // exactly that.
+        updatable: _updatable,
       );
     });
   }
@@ -319,6 +320,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     }
   }
 
+  /// Whether this is an AppImage: the one form that is a single file this
+  /// program owns, so replacing it and registering it are things it can
+  /// honestly offer to do. A tarball or a `flutter run` shows neither.
+  bool get _updatable => runningImage() != null;
+
   /// Puts the console in the applications menu, or takes it out.
   ///
   /// The answer is written down either way, which is what makes the question
@@ -355,9 +361,26 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
     final image = runningImage();
     if (image == null) return;
-    final wanted = await askAboutARepoint(context, menuTarget() ?? '', image);
+    final named = menuTarget() ?? '';
+    // Named before the question is asked, because the dialog says what the
+    // button will do and deleting somebody's file is the part of that worth
+    // saying out loud.
+    final replacing =
+        supersedes(named, '${applicationsDir()}/${image.split('/').last}')
+        ? named.split('/').last
+        : null;
+
+    final wanted = await askAboutARepoint(
+      context,
+      named,
+      image,
+      replacing: replacing,
+    );
     if (!mounted || !wanted) return;
     await _setInMenu(true);
+    // The entry now names where the image was kept, which is the one file
+    // this must never delete.
+    await removeSuperseded(named, menuTarget() ?? '');
   }
 
   /// Offers the menu once, on a first run that is an AppImage.

@@ -275,6 +275,48 @@ void main() {
       expect(menuTarget(env()), isNot(contains('Downloads')));
     });
 
+    test('the copy it replaces goes, and only that one', () async {
+      // A newer release downloaded by hand and run out of ~/Downloads, while
+      // the menu still names the one in ~/Applications. Left alone that is two
+      // programs, each checking GitHub for itself, one a version behind.
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final old = File('${apps.path}/X-0.3.1.AppImage')..writeAsStringSync('o');
+      final downloads = Directory('${home.path}/Downloads')..createSync();
+      final image = File('${downloads.path}/X-0.3.2.AppImage')
+        ..writeAsStringSync('n');
+
+      final kept = await keepImage(image.path, environment: env());
+      expect(supersedes(old.path, kept, environment: env()), isTrue);
+      expect(
+        await removeSuperseded(old.path, kept, environment: env()),
+        isTrue,
+      );
+      expect(old.existsSync(), isFalse);
+      expect(File(kept).existsSync(), isTrue, reason: 'never the kept one');
+    });
+
+    test('and nothing outside ~/Applications is ever deleted', () async {
+      // The entry can name anything at all — somebody edited it, or runs the
+      // image from a stick. Repointing is not a licence to delete that.
+      final elsewhere = Directory('${home.path}/stick')..createSync();
+      final theirs = File('${elsewhere.path}/X.AppImage')
+        ..writeAsStringSync('x');
+      final kept = '${home.path}/Applications/X-0.3.2.AppImage';
+
+      expect(
+        await removeSuperseded(theirs.path, kept, environment: env()),
+        isFalse,
+      );
+      expect(theirs.existsSync(), isTrue);
+
+      // Nor the one the entry now names, whatever it is called.
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final same = File(kept)..writeAsStringSync('n');
+      expect(await removeSuperseded(kept, kept, environment: env()), isFalse);
+      expect(same.existsSync(), isTrue);
+      expect(apps.existsSync(), isTrue);
+    });
+
     test('a stale entry is noticed, and a matching one is not', () {
       final apps = Directory('${home.path}/Applications')..createSync();
       File('${apps.path}/X.AppImage').writeAsStringSync('x');

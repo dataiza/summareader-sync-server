@@ -8,13 +8,20 @@ import 'format.dart';
 import 'pairing.dart';
 import 'server.dart';
 
-/// The shell both pairing dialogs sit in, so they read as pages of this
-/// console rather than as whatever the platform's dialog looks like.
+/// The shell every dialog in this console sits in, so they read as pages of it
+/// rather than as whatever the platform's dialog looks like.
+///
+/// [done] is the shell's own dismiss button, which is right for a dialog that
+/// only shows something — a token, a QR code — and wrong for one that asks a
+/// question. Those supply their own buttons, and a Done beside them is a third
+/// button meaning "whichever of these two is the quiet one", which is exactly
+/// the thing a dialog must not leave anybody guessing about.
 Future<void> showConsoleDialog(
   BuildContext context,
   String title,
-  Widget body,
-) => showDialog<void>(
+  Widget body, {
+  bool done = true,
+}) => showDialog<void>(
   context: context,
   builder: (context) => Dialog(
     backgroundColor: Ar.bg,
@@ -32,14 +39,16 @@ Future<void> showConsoleDialog(
             Text(title, style: Ar.headingStyle(22, forText: title)),
             const SizedBox(height: 16),
             body,
-            const SizedBox(height: 20),
-            Align(
-              alignment: Alignment.centerRight,
-              child: PrimaryButton(
-                label: 'Done',
-                onTap: () => Navigator.of(context).pop(),
+            if (done) ...[
+              const SizedBox(height: 20),
+              Align(
+                alignment: Alignment.centerRight,
+                child: PrimaryButton(
+                  label: 'Done',
+                  onTap: () => Navigator.of(context).pop(),
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
