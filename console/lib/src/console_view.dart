@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 
 import 'addresses.dart';
+import 'version.dart';
 import 'format.dart';
 import 'pairing.dart';
 import 'server.dart';
@@ -254,7 +255,29 @@ class _ConsoleViewState extends State<ConsoleView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Ar.headingStyle(32, forText: title)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Flexible(
+                    child: Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: Ar.headingStyle(32, forText: title),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Small and quiet, but present, exactly as the app does it:
+                  // "which one am I running" should not need a menu, and this
+                  // window has no About to put it in.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      consoleVersion,
+                      style: Ar.bodyStyle(12, color: Ar.dim(0.45)),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 6),
               Text(blurb, style: Ar.bodyStyle(13.5, color: Ar.dim(0.6))),
             ],
