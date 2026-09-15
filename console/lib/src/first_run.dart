@@ -160,3 +160,63 @@ Future<bool> emptyLibrary(String dir) async {
 
 /// Whether [dir] already holds a library.
 bool holdsALibrary(String dir) => File('$dir/data.db').existsSync();
+
+/// Whether to put the console in the applications menu, asked once.
+///
+/// An AppImage is a file in a folder and nothing knows about it: no icon, no
+/// menu entry, and a task switcher showing an unnamed window. Fixing that means
+/// writing into somebody's home, so it is asked rather than done — writing
+/// there unbidden the first time a program runs is what makes people distrust
+/// this format.
+///
+/// Returns true to add it. A no is remembered as firmly as a yes, or "once"
+/// becomes "every launch until you give in".
+Future<bool> askAboutTheMenu(BuildContext context) async {
+  var wanted = false;
+
+  await showConsoleDialog(
+    context,
+    'Add this to your applications?',
+    Builder(
+      builder: (dialogContext) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'This is a single file you downloaded, so nothing has told your '
+            'desktop about it. Adding it writes a launcher entry and icons '
+            'into ~/.local/share — no root, nothing outside your home, and '
+            'reversible from Configuration.',
+            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Leave it out and this keeps working exactly as it does now: run '
+            'the file. You will not be asked again either way.',
+            style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(
+                label: 'Not now',
+                onTap: () => Navigator.of(dialogContext).pop(),
+              ),
+              const SizedBox(width: 9),
+              PrimaryButton(
+                label: 'Add it',
+                onTap: () {
+                  wanted = true;
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  return wanted;
+}

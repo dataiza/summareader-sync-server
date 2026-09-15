@@ -1,7 +1,7 @@
 name: summareader_sync_console
 description: The desktop console for the SummaReader sync server.
 publish_to: none
-version: 0.2.0
+version: 0.3.0
 
 environment:
   sdk: ^3.9.0
@@ -16,6 +16,14 @@ dependencies:
 
   qr_flutter: ^4.1.0
   url_launcher: ^6.3.2
+
+  # For the update check only. The rest of this console talks to its own
+  # server with dart:io's HttpClient, which is fine for a loopback request
+  # nobody needs to fake — but an update check has to be testable without the
+  # network, and package:http/testing's MockClient is what the MCP console's
+  # equivalent is already tested with. One dependency, two identical
+  # implementations.
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:

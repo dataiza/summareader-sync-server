@@ -174,7 +174,11 @@ jobs:
         if: matrix.os == 'linux' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          # imagemagick for the one icon size the macOS ladder does not carry.
+          # The build skips it rather than failing when absent, so this is what
+          # keeps a *released* image from quietly losing its 48.
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            imagemagick
 
       - name: Build and package
         run: scripts/package-release.sh console ${{ matrix.os }}
@@ -209,7 +213,10 @@ jobs:
           # A release missing the platform somebody came for is worse than no
           # release, and un-drafting is the point of no return: `latest` is
           # what a download link reads, and it does not see drafts.
-          for want in headless-linux-amd64 console-linux-x64 console-macos; do
+          # .AppImage among them: it is the download a person actually takes
+          # on Linux, and the only one that can update itself. A release
+          # missing it would quietly send everyone back to unpacking tarballs.
+          for want in headless-linux-amd64 console-linux-x64 console-macos .AppImage; do
             echo "$assets" | grep -q "$want" || {
               echo "::error::nothing matching $want was uploaded"
               exit 1

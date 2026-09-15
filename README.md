@@ -20,9 +20,25 @@ Built releases are on the [Releases](../../releases/latest) page.
 
 | | For | File |
 |---|---|---|
-| **Headless** | a server reached over the network | `summareader-sync-headless-<os>-<arch>.tar.gz` (`.zip` on Windows) |
-| **Console, Linux** | a desktop, with a window | `summareader-sync-console-linux-x64.tar.gz` |
+| **Console, Linux** | a desktop, with a window | `SummaReaderSync-<version>-x86_64.AppImage` |
 | **Console, macOS** | a Mac, with a window | `summareader-sync-console-macos.zip` |
+| **Headless** | a server reached over the network | `summareader-sync-headless-<os>-<arch>.tar.gz` (`.zip` on Windows) |
+| Console, Linux, unpacked | packaging it yourself | `summareader-sync-console-linux-x64.tar.gz` |
+
+On Linux the AppImage is the one to take:
+
+```sh
+chmod +x SummaReaderSync-*-x86_64.AppImage
+./SummaReaderSync-*-x86_64.AppImage
+```
+
+No repository, no package manager, no root — one file. It offers once to add
+itself to your applications menu, and it updates itself: **Configuration → This
+program → Check for updates** asks GitHub for the newest release and replaces
+the file. Nothing is checked until you press it.
+
+It needs FUSE to mount itself, which every desktop has; if yours does not, run
+it with `--appimage-extract-and-run`, or take the tarball.
 
 Headless bundles are built for `linux-amd64`, `linux-arm64`, `darwin-amd64`,
 `darwin-arm64` and `windows-amd64`. Neither kind needs this repository.

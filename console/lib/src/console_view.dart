@@ -32,7 +32,18 @@ class ConsoleState {
     this.name = '',
     this.serverBinary,
     this.error,
+    this.updatable = false,
+    this.inMenu = false,
   });
+
+  /// Whether this console can update and register itself — true only when it
+  /// is running as an AppImage, which is the one form that is a single file it
+  /// owns. A tarball or a `flutter run` shows neither control, because both
+  /// would act on something nobody chose.
+  final bool updatable;
+
+  /// Whether it is already in the applications menu.
+  final bool inMenu;
 
   final String dir;
   final String addr;
@@ -85,24 +96,35 @@ class ConsoleState {
 
   ConsoleState withDocker(bool value) => _copy(docker: value);
 
-  ConsoleState _copy({bool? docker, String? error, bool keepError = true}) =>
-      ConsoleState(
-        dir: dir,
-        addr: addr,
-        running: running,
-        managed: managed,
-        devices: devices,
-        entries: entries,
-        bytes: bytes,
-        paired: paired,
-        hosts: hosts,
-        atLogin: atLogin,
-        docker: docker ?? this.docker,
-        compose: compose,
-        linux: linux,
-        serverBinary: serverBinary,
-        error: keepError ? this.error : error,
-      );
+  ConsoleState withMenu(bool value) => _copy(inMenu: value);
+
+  ConsoleState _copy({
+    bool? docker,
+    bool? inMenu,
+    String? error,
+    bool keepError = true,
+  }) => ConsoleState(
+    dir: dir,
+    addr: addr,
+    running: running,
+    managed: managed,
+    devices: devices,
+    entries: entries,
+    bytes: bytes,
+    paired: paired,
+    hosts: hosts,
+    atLogin: atLogin,
+    docker: docker ?? this.docker,
+    compose: compose,
+    linux: linux,
+    serverBinary: serverBinary,
+    error: keepError ? this.error : error,
+    // Carried, not defaulted. Left out of this list they would reset to
+    // false on every withError — the section would vanish the first time
+    // anything failed, which is exactly when somebody is looking at it.
+    updatable: updatable,
+    inMenu: inMenu ?? this.inMenu,
+  );
 
   String get countsLine =>
       '${plural(devices, 'device')} · ${plural(entries, 'entry')} · '
@@ -131,6 +153,8 @@ class ConsoleView extends StatefulWidget {
     this.onRemove,
     this.onName,
     this.onDir,
+    this.onCheckUpdates,
+    this.onInMenu,
   });
 
   final ConsoleState state;
@@ -154,6 +178,11 @@ class ConsoleView extends StatefulWidget {
   /// with --dir at launch", on a window whose whole job is to be the way you
   /// do that without a launch.
   final ValueChanged<String>? onDir;
+
+  /// Asked for by a press. See [ConsoleState.updatable] for why both of these
+  /// are absent unless this is an AppImage.
+  final VoidCallback? onCheckUpdates;
+  final ValueChanged<bool>? onInMenu;
   final ValueChanged<String>? onName;
 
   @override
@@ -231,6 +260,7 @@ class _ConsoleViewState extends State<ConsoleView> {
       ),
     _address(),
     if (state.linux) _atLogin(),
+    if (state.updatable) _thisProgram(),
   ]);
 
   /// The single column both pages are drawn in, at a width a paragraph is
@@ -307,6 +337,51 @@ class _ConsoleViewState extends State<ConsoleView> {
   );
 
   /// The top bar's menu.
+  /// The program itself, as opposed to the server it supervises.
+  ///
+  /// Only drawn when this is an AppImage — see [ConsoleState.updatable]. A
+  /// tarball has no single file to replace and no path worth writing into a
+  /// launcher entry.
+  Widget _thisProgram() => _section(
+    'This program',
+    'Where it came from and where it appears. An AppImage is one file you '
+        'downloaded, so keeping it current and putting it in the menu are '
+        'things it has to do for itself.',
+    _card([
+      _row(
+        'This console',
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(consoleVersion, style: Ar.bodyStyle(13, color: Ar.dim(0.75))),
+            const SizedBox(width: 12),
+            PillButton(
+              label: 'Check for updates',
+              icon: Icons.download_outlined,
+              height: 34,
+              onTap: widget.onCheckUpdates,
+            ),
+          ],
+        ),
+        hint:
+            'Asks GitHub for the newest release and replaces this AppImage '
+            'with it. Nothing is checked until you press it.',
+      ),
+      _row(
+        'In the applications menu',
+        ArSwitch(
+          label: 'In the applications menu',
+          value: state.inMenu,
+          onChanged: widget.onInMenu,
+        ),
+        hint:
+            'Writes a launcher entry and icons into ~/.local/share, so this '
+            'appears beside your other applications instead of only in the '
+            'folder you downloaded it to.',
+      ),
+    ]),
+  );
+
   // The section shape the app uses everywhere: a heading, a line saying what
   // the group is for, and one card of rows.
   Widget _section(String title, String blurb, Widget child) => Padding(

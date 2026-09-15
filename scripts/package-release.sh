@@ -91,6 +91,25 @@ console)
     build_server linux amd64 "$dir/$name"
     cp LICENSE CHANGELOG.md "$dir/"
     tar -czf "$out/$name-console-linux-x64.tar.gz" "$dir"
+
+    # And the same thing as one file.
+    #
+    # The AppImage is what a person downloads: chmod +x, run, no repository and
+    # no package manager. The tarball stays for anyone packaging this
+    # themselves or unpacking it where a fuse mount will not work.
+    #
+    # Only the AppImage can update itself — it is one file the console owns, so
+    # replacing it is a rename. Unpacked into a directory there is nothing to
+    # replace, and the console hides that control accordingly.
+    # The raw Flutter bundle, not $dir — that one has the LICENSE and the
+    # CHANGELOG copied in beside the binaries for the tarball, and neither
+    # belongs in usr/bin. build.sh puts the licence in usr/share/doc itself.
+    scripts/appimage/build.sh \
+      console/build/linux/x64/release/bundle \
+      "$dir/$name" \
+      "$version" \
+      "$out/SummaReaderSync-$version-x86_64.AppImage"
+
     rm -rf "$dir"
     ;;
   macos)

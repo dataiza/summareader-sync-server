@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'addresses.dart';
 import 'config.dart';
+import 'desktop_entry.dart';
 import 'first_run.dart';
+import 'updates.dart';
 import 'console_view.dart';
 import 'pairing_dialogs.dart';
 import 'server.dart';
@@ -106,12 +108,22 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       atLogin: serviceInstalled(),
       docker: _docker,
       compose: _compose != null,
+      // Both controls exist only for an AppImage: it is the one form that is a
+      // single file this program owns, so replacing it and registering it are
+      // things it can honestly offer to do.
+      updatable: runningImage() != null,
+      inMenu: isInMenu(),
     );
 
     // After the first frame, because a dialog needs a Navigator and there is
     // none until this widget is in a tree.
     if (!widget.chosen) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askWhereToPutIt());
+    } else {
+      // One question at a time, and where the library goes is the more
+      // important of the two: somebody answering that should not be handed a
+      // second dialog on top of the first.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _offerTheMenu());
     }
 
     unawaited(_refresh());
@@ -276,6 +288,73 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// library that no paired device knows about, which is a thing somebody may
   /// genuinely want; moving an existing one is `mv` and a decision, not a side
   /// effect of typing in a field.
+  /// Asks GitHub whether there is a newer release, and takes it.
+  ///
+  /// Both halves report through the error line the rest of this screen uses,
+  /// so a forty-megabyte download with no sign of life does not read as a
+  /// window that has hung.
+  Future<void> _checkUpdates() async {
+    setState(() => _state = _state.withError('Checking…'));
+    try {
+      final found = await const GitHubUpdates().newer();
+      if (!mounted) return;
+      if (found == null) {
+        setState(
+          () => _state = _state.withError('This is the newest release.'),
+        );
+        return;
+      }
+
+      final refusal = await replaceRunningImage(found);
+      if (!mounted) return;
+      setState(
+        () => _state = _state.withError(
+          refusal ?? 'Updated to ${found.version}. Restart to use it.',
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) _fail(error);
+    }
+  }
+
+  /// Puts the console in the applications menu, or takes it out.
+  ///
+  /// The answer is written down either way, which is what makes the question
+  /// on a first run a question asked once rather than every launch.
+  Future<void> _setInMenu(bool wanted) async {
+    final image = runningImage();
+    if (image == null) return;
+    try {
+      final refusal = wanted ? await addToMenu(image) : await removeFromMenu();
+      saveConfig(widget.configDir, {'in_menu': wanted});
+      if (!mounted) return;
+      setState(() {
+        _state = _state.withMenu(isInMenu());
+        if (refusal != null) _state = _state.withError(refusal);
+      });
+    } on Object catch (error) {
+      _fail(error);
+    }
+    await _refresh();
+  }
+
+  /// Offers the menu once, on a first run that is an AppImage.
+  ///
+  /// Only when the key is absent: a stored `false` is somebody having said no,
+  /// and asking again would make "once" mean "every launch until you give in".
+  Future<void> _offerTheMenu() async {
+    if (!mounted || runningImage() == null) return;
+    if (readConfig(widget.configDir)['in_menu'] is bool || isInMenu()) return;
+
+    final wanted = await askAboutTheMenu(context);
+    if (!mounted) return;
+    if (wanted) {
+      await _setInMenu(true);
+    } else {
+      saveConfig(widget.configDir, {'in_menu': false});
+    }
+  }
+
   /// The first-run question, asked once and then never again.
   ///
   /// Writing the key is what makes it once: `resolveDirs` reports `chosen` on
@@ -574,6 +653,8 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onRemove: _removeDevice,
     onName: _rename,
     onDir: _relocate,
+    onCheckUpdates: _checkUpdates,
+    onInMenu: _setInMenu,
     onRunAs: _setRunAs,
   );
 }

@@ -3,6 +3,27 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.0
+
+### An AppImage for Linux, that updates itself
+
+One file: `chmod +x`, run. No repository, no package manager, no root. The
+unpacked tarball stays for anyone packaging this themselves.
+
+**It updates itself.** Configuration → This program → *Check for updates* asks
+GitHub for the newest release and replaces the running image. Nothing is
+checked until it is pressed. Replacing the file a running program started from
+is safe — the kernel holds the old inode until the process ends, and the rename
+is atomic.
+
+**It offers, once, to join the applications menu**, writing a launcher entry
+and icons into `~/.local/share`. Asked rather than done, and a no is remembered
+as firmly as a yes. Both controls are absent unless it *is* an AppImage.
+
+The AGPL text now travels inside the image, in `usr/share/doc`. An image is a
+single file with no directory beside it, so there was nowhere else for it to be
+— and it was not in there at all.
+
 ## 0.2.0
 
 ### The library goes in the data directory

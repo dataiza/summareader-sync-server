@@ -1,0 +1,14 @@
+#!/bin/sh
+# What runs when somebody double-clicks the AppImage.
+#
+# Deliberately four lines. Everything an AppRun is usually asked to do — set
+# LD_LIBRARY_PATH, find the real binary, fix up XDG paths — this build does not
+# need: CMAKE_INSTALL_RPATH is `$ORIGIN/lib`, so the executable finds its own
+# libraries relative to itself wherever the image is mounted, and every user
+# path the console touches is resolved through XDG at run time rather than
+# relative to the program.
+#
+# `exec` rather than a plain call, so the console is the process the desktop
+# environment sees and closing it does not leave a shell behind.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/summareader_sync_console" "$@"
