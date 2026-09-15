@@ -69,6 +69,11 @@ jobs:
           cat notes.md
 
       - name: The public repository needs a token of its own
+        # Only on a tag. A workflow_dispatch run builds everything and
+        # publishes nothing, which is what makes it useful for proving the
+        # build without spending a tag — and demanding a token it will never
+        # use would take that away.
+        if: github.ref_type == 'tag'
         env:
           TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
         run: |
