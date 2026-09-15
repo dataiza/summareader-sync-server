@@ -75,6 +75,19 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $heading"
             exit 1
           fi
+
+          # How to run the thing, on the page people are standing on when they
+          # decide to download it. A downloaded AppImage arrives without its
+          # execute bit — no HTTP transfer can carry one — so a double-click
+          # gets "there is no app installed for AppImage files" rather than a
+          # window. The README says this; nobody reads a README before
+          # double-clicking a file they just downloaded.
+          #
+          # A file rather than a heredoc here: this block is indented inside
+          # the YAML, and a heredoc would carry that indentation into the
+          # notes, where ten leading spaces render as a code block.
+          cat scripts/release-notes-running.md >>notes.md
+
           cat notes.md
 
       # A draft, so nothing is downloadable while it fills up: `releases/latest`
