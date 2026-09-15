@@ -69,7 +69,11 @@ String configBind(String dir) => (readConfig(dir)['http'] as String?) ?? '';
 /// Go for exactly this reason. Follow the key to find the file and a `dir`
 /// pointing anywhere makes the file that holds it unfindable on the next
 /// start.
-typedef Dirs = ({String config, String data});
+///
+/// [chosen] is false only when nothing at all said where — no flag, no
+/// environment variable, no key. That is the condition the window asks its
+/// first-run question on, and writing the key is what stops it asking again.
+typedef Dirs = ({String config, String data, bool chosen});
 
 /// The precedence the server resolves, spelled once for this side of it.
 ///
@@ -78,15 +82,13 @@ typedef Dirs = ({String config, String data});
 Dirs resolveDirs(List<String> args, Map<String, String> environment) {
   final named = flagValue(args, '--dir') ?? environment['SUMMAREADER_DIR'];
   if (named != null && named.isNotEmpty) {
-    return (config: named, data: named);
+    return (config: named, data: named, chosen: true);
   }
 
   final fallback = defaultDataDir(environment);
   final stored = readConfig(fallback)['dir'];
-  return (
-    config: fallback,
-    data: stored is String && stored.isNotEmpty ? stored : fallback,
-  );
+  final said = stored is String && stored.isNotEmpty;
+  return (config: fallback, data: said ? stored : fallback, chosen: said);
 }
 
 /// Where the database goes when nothing says otherwise — the same directory

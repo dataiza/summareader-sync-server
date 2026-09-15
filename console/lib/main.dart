@@ -28,6 +28,7 @@ void main(List<String> args) {
     ConsoleApp(
       dir: where.data,
       configDir: where.config,
+      chosen: where.chosen,
       addr:
           flagValue(args, '--http') ??
           env['SUMMAREADER_HTTP'] ??
@@ -42,6 +43,7 @@ class ConsoleApp extends StatelessWidget {
     required this.dir,
     required this.configDir,
     required this.addr,
+    required this.chosen,
   });
 
   /// Where the database is.
@@ -55,6 +57,9 @@ class ConsoleApp extends StatelessWidget {
   final String configDir;
 
   final String addr;
+
+  /// Whether anything said where the library goes.
+  final bool chosen;
 
   @override
   Widget build(BuildContext context) {
@@ -72,7 +77,12 @@ class ConsoleApp extends StatelessWidget {
       theme: Ar.themeData(brightness),
       home: Scaffold(
         backgroundColor: Ar.bg,
-        body: ConsoleScreen(dir: dir, configDir: configDir, addr: addr),
+        body: ConsoleScreen(
+          dir: dir,
+          configDir: configDir,
+          addr: addr,
+          chosen: chosen,
+        ),
       ),
     );
   }

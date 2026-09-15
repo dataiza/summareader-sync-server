@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'addresses.dart';
 import 'config.dart';
+import 'first_run.dart';
 import 'console_view.dart';
 import 'pairing_dialogs.dart';
 import 'server.dart';
@@ -21,6 +22,7 @@ class ConsoleScreen extends StatefulWidget {
     required this.dir,
     required this.configDir,
     required this.addr,
+    this.chosen = true,
   });
 
   /// Where the database is when the window opens. Mutable afterwards — see
@@ -32,6 +34,10 @@ class ConsoleScreen extends StatefulWidget {
   /// server finds its settings from the flag, the environment or the default
   /// and never from the `dir` key it is about to read.
   final String configDir;
+
+  /// False when nothing said where the library goes, which is the one
+  /// condition the first-run question is asked on.
+  final bool chosen;
 
   final String addr;
 
@@ -101,6 +107,12 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       docker: _docker,
       compose: _compose != null,
     );
+
+    // After the first frame, because a dialog needs a Navigator and there is
+    // none until this widget is in a tree.
+    if (!widget.chosen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askWhereToPutIt());
+    }
 
     unawaited(_refresh());
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
@@ -264,6 +276,37 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// library that no paired device knows about, which is a thing somebody may
   /// genuinely want; moving an existing one is `mv` and a decision, not a side
   /// effect of typing in a field.
+  /// The first-run question, asked once and then never again.
+  ///
+  /// Writing the key is what makes it once: `resolveDirs` reports `chosen` on
+  /// the next launch and this is not called. Dismissing without answering
+  /// leaves the default in place and asks again, which is right — the question
+  /// is "where", and no answer is not an answer.
+  Future<void> _askWhereToPutIt() async {
+    if (!mounted) return;
+    final wanted = await askWhereTheLibraryGoes(context, _dir);
+    if (wanted == null || !mounted) return;
+
+    // Asked before anything is written, because the answer decides what is
+    // written. A directory that already holds a database is almost always the
+    // one that was meant — a reinstall, or a service that has been filling it
+    // — so this only comes up at all when there is something to lose.
+    if (holdsALibrary(wanted)) {
+      await askAboutWhatIsAlreadyThere(context, wanted);
+      if (!mounted) return;
+    }
+
+    if (wanted == _dir) {
+      // The default, accepted. Still written down: it is the difference
+      // between "nobody has said" and "this was agreed to", and without it the
+      // question comes back on every launch.
+      saveConfig(widget.configDir, {'dir': wanted});
+      await _refresh();
+      return;
+    }
+    await _relocate(wanted);
+  }
+
   Future<void> _relocate(String next) async {
     final wanted = next.trim();
     if (wanted.isEmpty || wanted == _dir) return;

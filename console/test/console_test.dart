@@ -7,6 +7,7 @@ import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
+import 'package:summareader_sync_console/src/first_run.dart';
 import 'package:summareader_sync_console/src/format.dart';
 import 'package:summareader_sync_console/src/pairing.dart';
 import 'package:summareader_sync_console/src/server.dart';
@@ -15,6 +16,7 @@ import 'package:summareader_sync_console/src/service.dart';
 void main() {
   _theTwoPages();
   _whereThingsAre();
+  _theFirstRun();
   _deviceControls();
   _serverIssuedCode();
 
@@ -574,6 +576,78 @@ void _whereThingsAre() {
         reason: 'the file stays where it was found',
       );
       expect(where.data, '/srv/elsewhere');
+    });
+  });
+}
+
+/// The first-run question, and the one that guards a database already there.
+void _theFirstRun() {
+  group('being asked where the library goes', () {
+    late Directory dir;
+
+    setUp(() => dir = Directory.systemTemp.createTempSync('console-first'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('nothing said means nothing chosen', () {
+      final env = {
+        'HOME': dir.path,
+        'XDG_DATA_HOME': '',
+        'XDG_CONFIG_HOME': '',
+      };
+      expect(resolveDirs(const [], env).chosen, isFalse);
+    });
+
+    test('a flag, a variable or a key all count as an answer', () {
+      final env = {
+        'HOME': dir.path,
+        'XDG_DATA_HOME': '',
+        'XDG_CONFIG_HOME': '',
+      };
+      expect(resolveDirs(const ['--dir=/srv/sync'], env).chosen, isTrue);
+      expect(
+        resolveDirs(const [], {...env, 'SUMMAREADER_DIR': '/srv/sync'}).chosen,
+        isTrue,
+      );
+
+      final fallback = defaultDataDir(env);
+      Directory(fallback).createSync(recursive: true);
+      File('$fallback/$configName').writeAsStringSync('{"dir": "/srv/x"}');
+      expect(
+        resolveDirs(const [], env).chosen,
+        isTrue,
+        reason:
+            'accepting the default writes the key, which is what stops '
+            'the question coming back on every launch',
+      );
+    });
+
+    test('emptying takes the database and leaves the settings', () {
+      // The config file lives in here too on a default install, and it holds
+      // the server's name, its address and any token an operator set. Losing
+      // those to a question about the library would answer something nobody
+      // asked.
+      for (final name in ['data.db', 'data.db-wal', 'auxiliary.db']) {
+        File('${dir.path}/$name').writeAsStringSync('x');
+      }
+      File('${dir.path}/$configName').writeAsStringSync('{"name": "Acme"}');
+
+      expect(holdsALibrary(dir.path), isTrue);
+      expect(emptyLibrary(dir.path), completion(isTrue));
+    });
+
+    test('and afterwards there is no library and there are settings', () async {
+      File('${dir.path}/data.db').writeAsStringSync('x');
+      File('${dir.path}/$configName').writeAsStringSync('{"name": "Acme"}');
+
+      await emptyLibrary(dir.path);
+
+      expect(holdsALibrary(dir.path), isFalse);
+      expect(readConfig(dir.path)['name'], 'Acme');
+    });
+
+    test('an empty directory is not a library', () {
+      expect(holdsALibrary(dir.path), isFalse);
+      expect(emptyLibrary(dir.path), completion(isFalse));
     });
   });
 }
