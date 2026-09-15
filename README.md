@@ -8,6 +8,25 @@ stores opaque ciphertext against sequence numbers and never learns what any of
 it means. It cannot search, cannot count unread, and cannot render a web
 reader, because it holds no keys.
 
+## Downloads
+
+Built releases are on this repository's [Releases](../../releases/latest) page —
+three per platform, and they are not variations of one another.
+
+| | For | File |
+|---|---|---|
+| **Headless** | a server reached over the network | `summareader-sync-headless-<os>-<arch>.tar.gz` |
+| **Console, Linux** | a desktop, with a window | `summareader-sync-console-linux-x64.tar.gz` |
+| **Console, macOS** | a Mac, with a window | `summareader-sync-console-macos.zip` |
+
+A headless bundle is everything a server needs and no window: the binary, an
+installer that writes a systemd user unit, the unit, and a compose file whose
+Dockerfile copies the binary rather than compiling it. A console bundle is the
+window carrying its own copy of the server. Neither needs this repository.
+
+GitHub attaches the tagged source to every release, which is what the licence
+below asks for.
+
 ## Start here
 
 ```sh

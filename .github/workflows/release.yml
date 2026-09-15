@@ -7,11 +7,15 @@ name: Release
 # debugged without spending a tag — it builds everything and publishes nothing,
 # because the publish step needs a tag to name the release after.
 #
-# **There is no private draft here.** The app's release workflow has one
-# because its premium build must never reach a public repository; this server
-# has one product and it is free software, so the release is created in
-# dataiza/summareader-sync-server-release as a draft, filled by the build jobs,
-# and un-drafted at the end. One copy of every file, uploaded once.
+# **The release lives in this repository.** There is no separate downloads
+# repository and no cross-repository token: this repository is public, so a
+# release here already has a stable, unauthenticated download URL — which is
+# the only thing a second repository ever bought. GitHub attaches the tagged
+# source to every release by itself, which is also what satisfies the licence.
+#
+# A draft while it fills up, un-drafted at the end: `releases/latest` is what a
+# download link reads and it does not see drafts, so nothing is downloadable
+# until every build that was going to succeed has uploaded.
 on:
   workflow_dispatch:
   push:
@@ -20,18 +24,16 @@ on:
 # Deliberately no `concurrency` group: a release build must never be cancelled
 # by whatever is pushed next.
 
-env:
-  # The public repository. Named once; every job that writes to it reads this.
-  RELEASE_REPO: dataiza/summareader-sync-server-release
-
 jobs:
   # Everything that can be wrong before a single byte is compiled: the tag
-  # against version.go, the changelog section, and the token that the other
-  # repository needs. Discovering any of these after four builds have run is
-  # the same failure an hour later.
+  # against version.go and the changelog section the notes are read from.
+  # Discovering either after four builds have run is the same failure an hour
+  # later.
   open:
     name: Open the release
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -68,37 +70,23 @@ jobs:
           fi
           cat notes.md
 
-      - name: The public repository needs a token of its own
-        # Only on a tag. A workflow_dispatch run builds everything and
-        # publishes nothing, which is what makes it useful for proving the
-        # build without spending a tag — and demanding a token it will never
-        # use would take that away.
-        if: github.ref_type == 'tag'
-        env:
-          TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::RELEASE_REPO_TOKEN is empty — GITHUB_TOKEN cannot write to another repository."
-            exit 1
-          fi
-
-      # A draft, so nothing is downloadable while it fills up. The tag does not
-      # exist in the other repository; `gh release create` makes it, pointing
-      # at that repository's default branch.
+      # A draft, so nothing is downloadable while it fills up: `releases/latest`
+      # does not see drafts, which is the whole reason this is safe to run
+      # before the builds rather than after them.
       - name: Create it, or reuse the one a previous attempt left
         if: github.ref_type == 'tag'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # Re-running failed jobs must not replace a draft that already
             # holds the assets from the jobs that passed.
             echo "::notice::reusing the existing draft for $GITHUB_REF_NAME"
-            gh release edit "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
               --notes-file notes.md
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
               --draft --title "$GITHUB_REF_NAME" --notes-file notes.md
           fi
 
@@ -112,6 +100,8 @@ jobs:
     name: Headless bundles
     needs: open
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: write
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -129,13 +119,13 @@ jobs:
       - name: Into the release
         if: github.ref_type == 'tag'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # --clobber so re-running a failed job replaces its own files rather
           # than failing on ones a previous attempt already uploaded.
           gh release upload "$GITHUB_REF_NAME" out/* \
-            --repo "$RELEASE_REPO" --clobber
+            --repo "$GITHUB_REPOSITORY" --clobber
 
   # The window, for the two platforms there is a runner for. A Flutter desktop
   # build is the machine it was built on — there is no cross-compiling here,
@@ -144,6 +134,8 @@ jobs:
     name: Console (${{ matrix.os }})
     needs: open
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     timeout-minutes: 45
     strategy:
       # One platform failing should not hide whether the other builds.
@@ -183,11 +175,11 @@ jobs:
       - name: Into the release
         if: github.ref_type == 'tag'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release upload "$GITHUB_REF_NAME" out/* \
-            --repo "$RELEASE_REPO" --clobber
+            --repo "$GITHUB_REPOSITORY" --clobber
 
   # The one job that builds nothing: it makes the release visible, once every
   # build that was going to succeed has uploaded.
@@ -196,13 +188,15 @@ jobs:
     needs: [open, headless, console]
     if: github.ref_type == 'tag'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    permissions:
+      contents: write
     steps:
       - name: Check what is there, then un-draft it
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          assets=$(gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+          assets=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name')
           echo "$assets"
           # A release missing the platform somebody came for is worse than no
@@ -214,5 +208,5 @@ jobs:
               exit 1
             }
           done
-          gh release edit "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" --draft=false
-          echo "published: https://github.com/$RELEASE_REPO/releases/tag/$GITHUB_REF_NAME"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+          echo "published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
