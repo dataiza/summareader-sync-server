@@ -145,7 +145,7 @@ to the file, ignored at the next launch, and looked like a console that
 forgets what it was told. Left unset, the address comes from the config inside
 the data directory — which is the point of keeping one directory per
 installation. That last part is the point: a console opening
-`~/.config/summareader-sync` while `run.sh` serves `./pb_data` would report an
+`~/.local/share/summareader-sync` while `run.sh` serves `./pb_data` would report an
 empty server and be right about the wrong database.
 
 The console is a Flutter desktop app, a separate program from the server rather
@@ -154,7 +154,7 @@ server binary to run.
 
 `--http` and `--dir` work here too, spelled as the server spells them, and so
 does the [config file](#configuration) and the same precedence — without any of
-them it opens on `127.0.0.1:8099` and `~/.config/summareader-sync`. If a
+them it opens on `127.0.0.1:8099` and `~/.local/share/summareader-sync`. If a
 service is already installed, it opens on *that* service's address instead,
 because that is where the server actually is.
 

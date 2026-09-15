@@ -3,6 +3,44 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.2.0
+
+### The library goes in the data directory
+
+`~/.local/share/summareader-sync` on Linux. It was `os.UserConfigDir()` —
+`~/.config` — for a SQLite database holding an account and every device token,
+while `scripts/install.sh` had always used `~/.local/share` and `run.sh` and
+both compose files used `./pb_data`. The systemd install, the window and a bare
+binary each opened a different database and nothing said so.
+
+**macOS and Windows are unchanged.** There is one sensible place for both there
+and it is the one already in use, so on those platforms this is a migration
+with nothing to migrate.
+
+`XDG_DATA_HOME` is honoured when absolute and ignored when not: resolving a
+relative one against the working directory is two databases waiting to happen.
+
+`serve` now prints which directory it opened and who decided — the config file,
+the environment or the default.
+
+### The window asks where, once, and lets you change it
+
+On a first run, and only when nothing else said. The **Data directory** row in
+Configuration was a line of text reading "set with --dir at launch"; it is a
+field now. Nothing is copied and nothing is deleted when it changes: an empty
+directory is a new library no paired device knows about, and moving an existing
+one is `mv` and a decision.
+
+A database already in the chosen directory is **kept** unless you say
+otherwise. Starting again deletes the account and every device token, which
+nothing here can restore, and it says so in those words.
+
+### Configuration is a button
+
+It was a menu holding exactly one item, so reaching the settings meant opening
+a menu to choose the only thing in it. A pill now, labelled Configuration, the
+way the app spells the same control.
+
 ## 0.1.0
 
 The first published build. What is in it, rather than what changed — there is
