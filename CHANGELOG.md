@@ -3,6 +3,17 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.2
+
+### Configuration no longer asks a question it has already asked
+
+**In the applications menu** is gone from the settings. The console offers the
+menu once on a first run, and offers to repoint the entry when it names
+somewhere stale — between them there is nothing left for a switch to say, and a
+third place for one answer to live is a third place for it to disagree.
+
+**Check for updates** is where it was, and is now the whole of *This program*.
+
 ## 0.3.1
 
 ### The menu entry survives tidying your downloads

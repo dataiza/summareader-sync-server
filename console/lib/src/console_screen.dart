@@ -112,7 +112,6 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       // single file this program owns, so replacing it and registering it are
       // things it can honestly offer to do.
       updatable: runningImage() != null,
-      inMenu: isInMenu(),
     );
 
     // After the first frame, because a dialog needs a Navigator and there is
@@ -337,7 +336,6 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       saveConfig(widget.configDir, {'in_menu': wanted});
       if (!mounted) return;
       setState(() {
-        _state = _state.withMenu(isInMenu());
         if (refusal != null) _state = _state.withError(refusal);
       });
     } on Object catch (error) {
@@ -678,7 +676,6 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onName: _rename,
     onDir: _relocate,
     onCheckUpdates: _checkUpdates,
-    onInMenu: _setInMenu,
     onRunAs: _setRunAs,
   );
 }

@@ -33,7 +33,6 @@ class ConsoleState {
     this.serverBinary,
     this.error,
     this.updatable = false,
-    this.inMenu = false,
   });
 
   /// Whether this console can update and register itself — true only when it
@@ -41,9 +40,6 @@ class ConsoleState {
   /// owns. A tarball or a `flutter run` shows neither control, because both
   /// would act on something nobody chose.
   final bool updatable;
-
-  /// Whether it is already in the applications menu.
-  final bool inMenu;
 
   final String dir;
   final String addr;
@@ -96,35 +92,28 @@ class ConsoleState {
 
   ConsoleState withDocker(bool value) => _copy(docker: value);
 
-  ConsoleState withMenu(bool value) => _copy(inMenu: value);
-
-  ConsoleState _copy({
-    bool? docker,
-    bool? inMenu,
-    String? error,
-    bool keepError = true,
-  }) => ConsoleState(
-    dir: dir,
-    addr: addr,
-    running: running,
-    managed: managed,
-    devices: devices,
-    entries: entries,
-    bytes: bytes,
-    paired: paired,
-    hosts: hosts,
-    atLogin: atLogin,
-    docker: docker ?? this.docker,
-    compose: compose,
-    linux: linux,
-    serverBinary: serverBinary,
-    error: keepError ? this.error : error,
-    // Carried, not defaulted. Left out of this list they would reset to
-    // false on every withError — the section would vanish the first time
-    // anything failed, which is exactly when somebody is looking at it.
-    updatable: updatable,
-    inMenu: inMenu ?? this.inMenu,
-  );
+  ConsoleState _copy({bool? docker, String? error, bool keepError = true}) =>
+      ConsoleState(
+        dir: dir,
+        addr: addr,
+        running: running,
+        managed: managed,
+        devices: devices,
+        entries: entries,
+        bytes: bytes,
+        paired: paired,
+        hosts: hosts,
+        atLogin: atLogin,
+        docker: docker ?? this.docker,
+        compose: compose,
+        linux: linux,
+        serverBinary: serverBinary,
+        error: keepError ? this.error : error,
+        // Carried, not defaulted. Left out of this list they would reset to
+        // false on every withError — the section would vanish the first time
+        // anything failed, which is exactly when somebody is looking at it.
+        updatable: updatable,
+      );
 
   String get countsLine =>
       '${plural(devices, 'device')} · ${plural(entries, 'entry')} · '
@@ -154,7 +143,6 @@ class ConsoleView extends StatefulWidget {
     this.onName,
     this.onDir,
     this.onCheckUpdates,
-    this.onInMenu,
   });
 
   final ConsoleState state;
@@ -179,10 +167,9 @@ class ConsoleView extends StatefulWidget {
   /// do that without a launch.
   final ValueChanged<String>? onDir;
 
-  /// Asked for by a press. See [ConsoleState.updatable] for why both of these
-  /// are absent unless this is an AppImage.
+  /// Asked for by a press. Absent unless this is an AppImage — see
+  /// [ConsoleState.updatable].
   final VoidCallback? onCheckUpdates;
-  final ValueChanged<bool>? onInMenu;
   final ValueChanged<String>? onName;
 
   @override
@@ -340,13 +327,11 @@ class _ConsoleViewState extends State<ConsoleView> {
   /// The program itself, as opposed to the server it supervises.
   ///
   /// Only drawn when this is an AppImage — see [ConsoleState.updatable]. A
-  /// tarball has no single file to replace and no path worth writing into a
-  /// launcher entry.
+  /// tarball has no single file to replace.
   Widget _thisProgram() => _section(
     'This program',
-    'Where it came from and where it appears. An AppImage is one file you '
-        'downloaded, so keeping it current and putting it in the menu are '
-        'things it has to do for itself.',
+    'An AppImage is one file you downloaded, with no package manager behind '
+        'it, so keeping itself current is something it has to do for itself.',
     _card([
       _row(
         'This console',
@@ -366,18 +351,6 @@ class _ConsoleViewState extends State<ConsoleView> {
         hint:
             'Asks GitHub for the newest release and replaces this AppImage '
             'with it. Nothing is checked until you press it.',
-      ),
-      _row(
-        'In the applications menu',
-        ArSwitch(
-          label: 'In the applications menu',
-          value: state.inMenu,
-          onChanged: widget.onInMenu,
-        ),
-        hint:
-            'Writes a launcher entry and icons into ~/.local/share, so this '
-            'appears beside your other applications instead of only in the '
-            'folder you downloaded it to.',
       ),
     ]),
   );
