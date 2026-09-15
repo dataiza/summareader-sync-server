@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -229,5 +230,80 @@ func TestIsServe(t *testing.T) {
 func TestExampleConfigParses(t *testing.T) {
 	if _, err := loadConfig("summareader-sync.example.json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The default the whole deployment story now rests on.
+//
+// It had no test at all while it pointed at the config directory, which is
+// how it stayed wrong long enough for install.sh, run.sh and the window to
+// each grow a different answer.
+func TestTheDefaultIsTheDataDirectory(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip("those platforms have one place for both, deliberately")
+	}
+	t.Setenv("HOME", "/home/somebody")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	want := filepath.Join("/home/somebody", ".local", "share", "summareader-sync")
+	if got := defaultDataDir(); got != want {
+		t.Fatalf("defaultDataDir() = %q, want %q", got, want)
+	}
+}
+
+func TestXdgDataHomeIsHonouredWhenAbsolute(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip("XDG does not apply there")
+	}
+	t.Setenv("HOME", "/home/somebody")
+	t.Setenv("XDG_DATA_HOME", "/mnt/big/share")
+
+	want := filepath.Join("/mnt/big/share", "summareader-sync")
+	if got := defaultDataDir(); got != want {
+		t.Fatalf("defaultDataDir() = %q, want %q", got, want)
+	}
+}
+
+// The specification says XDG_DATA_HOME must be absolute, and a relative one
+// resolved against the working directory is how a server started from two
+// shells ends up with two databases and no way to tell which is which.
+func TestARelativeXdgDataHomeIsIgnored(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip("XDG does not apply there")
+	}
+	t.Setenv("HOME", "/home/somebody")
+	t.Setenv("XDG_DATA_HOME", "relative/share")
+
+	want := filepath.Join("/home/somebody", ".local", "share", "summareader-sync")
+	if got := defaultDataDir(); got != want {
+		t.Fatalf("defaultDataDir() = %q, want %q — a relative XDG_DATA_HOME must not be followed", got, want)
+	}
+}
+
+// The chicken-and-egg that makes a `dir` key usable at all: the file is found
+// at the default location, and then relocates the database away from it. If
+// configPath ever followed the key it had just read, a `dir` pointing anywhere
+// would make the file unfindable on the next start.
+func TestTheConfigFileDoesNotFollowItsOwnDirKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	def := defaultDataDir()
+	if err := os.MkdirAll(def, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(home, "elsewhere")
+	writeConfig(t, def, `{"dir": "`+elsewhere+`"}`)
+
+	got, err := resolveConfig([]string{"summareader-sync", "serve"}, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dir != elsewhere {
+		t.Fatalf("Dir = %q, want the file's own key %q", got.Dir, elsewhere)
+	}
+	if path := configPath([]string{"summareader-sync", "serve"}, os.Getenv); path != filepath.Join(def, configName) {
+		t.Fatalf("configPath = %q, want it to stay at the default %q", path, filepath.Join(def, configName))
 	}
 }

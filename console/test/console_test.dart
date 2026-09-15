@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
@@ -13,6 +14,7 @@ import 'package:summareader_sync_console/src/service.dart';
 
 void main() {
   _theTwoPages();
+  _whereThingsAre();
   _deviceControls();
   _serverIssuedCode();
 
@@ -417,7 +419,7 @@ void _serverIssuedCode() {
 }
 
 void _theTwoPages() {
-  group('the window and what the menu keeps off it', () {
+  group('the window and what Configuration keeps off it', () {
     // Linux and a binary present, which is the only state in which every
     // control this checks for is drawn at all.
     const state = ConsoleState(
@@ -447,23 +449,23 @@ void _theTwoPages() {
       expect(find.text('Create first device'), findsOneWidget);
     });
 
-    testWidgets('the menu reaches everything that moved', (tester) async {
+    testWidgets('one press reaches everything that moved', (tester) async {
+      // One press, not two. This was a MenuAnchor holding a single item, so
+      // reaching the settings meant opening a menu to choose the only thing in
+      // it — and the app spells the same control as a plain pill.
       await pumpConsole(tester);
 
-      await tester.tap(find.text('Menu'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Settings').last);
+      await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
 
       // Nothing was cut on the way across: the name, the address, the port,
-      // the directory and the service are all on the page the menu opens.
+      // the directory and the service are all on the page it opens.
       for (final moved in [
         'How it is reached',
         'Name',
         'Bind address',
         'Port',
         'Data directory',
-        '/data',
         'Start at login',
         'Keep it running',
       ]) {
@@ -471,9 +473,107 @@ void _theTwoPages() {
       }
       expect(find.text('Devices'), findsNothing);
 
-      await tester.tap(find.text('Back'));
+      await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('Devices'), findsOneWidget);
+    });
+
+    testWidgets('the data directory can be typed into now', (tester) async {
+      // It was a line of text reading "set with --dir at launch", in a window
+      // whose whole purpose is to be the way that is done without a launch.
+      String? chosen;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(state: state, onDir: (next) => chosen = next),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      final field = find.widgetWithText(ArField, '/data');
+      expect(field, findsOneWidget, reason: 'the current directory is in it');
+
+      await tester.enterText(field, '/mnt/big/sync');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(chosen, '/mnt/big/sync');
+    });
+  });
+}
+
+/// Where the file is, and where the database is — which the same directory
+/// only by default.
+void _whereThingsAre() {
+  group('resolving the two directories', () {
+    late Directory home;
+
+    setUp(() => home = Directory.systemTemp.createTempSync('console-dirs'));
+    tearDown(() => home.deleteSync(recursive: true));
+
+    Map<String, String> env() => {
+      'HOME': home.path,
+      // Emptied rather than absent: this process has one, and a test that
+      // inherited it would assert the developer's machine.
+      'XDG_DATA_HOME': '',
+      'XDG_CONFIG_HOME': '',
+    };
+
+    test('the default is the data directory, not the config one', () {
+      // It was XDG_CONFIG_HOME on both sides until the server moved. A window
+      // that opens the wrong database reports an empty server that is running
+      // perfectly, which is the worst shape this bug has.
+      expect(
+        defaultDataDir(env()),
+        '${home.path}/.local/share/summareader-sync',
+      );
+    });
+
+    test('an absolute XDG_DATA_HOME is followed and a relative one is not', () {
+      expect(
+        defaultDataDir({...env(), 'XDG_DATA_HOME': '/mnt/big/share'}),
+        '/mnt/big/share/summareader-sync',
+      );
+      expect(
+        defaultDataDir({...env(), 'XDG_DATA_HOME': 'relative/share'}),
+        '${home.path}/.local/share/summareader-sync',
+        reason:
+            'the specification says absolute, and a relative one resolved '
+            'against the working directory is two databases waiting to happen',
+      );
+    });
+
+    test('with nothing configured, both are the default', () {
+      final where = resolveDirs(const [], env());
+      expect(where.config, '${home.path}/.local/share/summareader-sync');
+      expect(where.data, where.config);
+    });
+
+    test('--dir moves the file and the database together', () {
+      final where = resolveDirs(const ['--dir=/srv/sync'], env());
+      expect(where.config, '/srv/sync');
+      expect(where.data, '/srv/sync');
+    });
+
+    test('a dir key moves the database and leaves the file behind', () {
+      // The rule that makes the key usable at all. Follow it to find the file
+      // and a `dir` pointing anywhere makes the file that holds it unfindable
+      // on the next start.
+      final fallback = defaultDataDir(env());
+      Directory(fallback).createSync(recursive: true);
+      File(
+        '$fallback/$configName',
+      ).writeAsStringSync('{"dir": "/srv/elsewhere"}');
+
+      final where = resolveDirs(const [], env());
+      expect(
+        where.config,
+        fallback,
+        reason: 'the file stays where it was found',
+      );
+      expect(where.data, '/srv/elsewhere');
     });
   });
 }

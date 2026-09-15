@@ -16,9 +16,23 @@ import 'service.dart';
 /// The console: everything that has to talk to a process, a socket or systemd,
 /// wrapped around the view that draws it.
 class ConsoleScreen extends StatefulWidget {
-  const ConsoleScreen({super.key, required this.dir, required this.addr});
+  const ConsoleScreen({
+    super.key,
+    required this.dir,
+    required this.configDir,
+    required this.addr,
+  });
 
+  /// Where the database is when the window opens. Mutable afterwards — see
+  /// `_dir` in the state, which is what everything reads once somebody has
+  /// chosen one.
   final String dir;
+
+  /// Where the config file is. Never moves while the window is open: the
+  /// server finds its settings from the flag, the environment or the default
+  /// and never from the `dir` key it is about to read.
+  final String configDir;
+
   final String addr;
 
   @override
@@ -42,10 +56,17 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// PocketBase's own default — "Acme" — is what it answers with.
   String _name = '';
 
+  /// Where the database is, now. Not `widget.dir`: choosing a directory in the
+  /// window has to take effect without restarting the console, and a final
+  /// field cannot.
+  late String _dir;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    _dir = widget.dir;
 
     final exe = serverBinary();
 
@@ -61,16 +82,16 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
     _server = SyncServer(
       exe: exe,
-      dir: widget.dir,
+      dir: _dir,
       token: token,
       addr: installed.isEmpty ? widget.addr : installed,
     );
-    _compose = exe == null ? null : composeFile(exe, widget.dir);
+    _compose = exe == null ? null : composeFile(exe, _dir);
     _docker = serviceDocker();
-    _name = (readConfig(widget.dir)['name'] as String?) ?? '';
+    _name = (readConfig(widget.configDir)['name'] as String?) ?? '';
 
     _state = ConsoleState(
-      dir: widget.dir,
+      dir: _dir,
       addr: _server.addr,
       hosts: bindHosts(splitBind(_server.addr).$1, const []),
       linux: Platform.isLinux,
@@ -122,7 +143,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     setState(() {
       _lan = lan;
       _state = ConsoleState(
-        dir: widget.dir,
+        dir: _dir,
         addr: _server.addr,
         running: running,
         managed: _server.managed,
@@ -132,7 +153,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         entries: metrics == null
             ? _state.entries
             : gauge(metrics, 'summareader_server_log_entries').round(),
-        bytes: dirSize(widget.dir),
+        bytes: dirSize(_dir),
         paired: devices ?? _state.paired,
         hosts: bindHosts(splitBind(_server.addr).$1, lan),
         linux: Platform.isLinux,
@@ -159,7 +180,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   ServiceConfig _serviceConfig({String? addr, bool? docker}) => ServiceConfig(
     exe: _server.exe ?? '',
     addr: addr ?? _server.addr,
-    dir: widget.dir,
+    dir: _dir,
     token: _server.token,
     compose: (docker ?? _docker) ? _compose : null,
     uid: _uid(),
@@ -212,7 +233,58 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       final wasRunning = await _server.running;
       await _server.stop();
       setState(() => _name = wanted);
-      saveConfig(widget.dir, {'name': wanted.isEmpty ? null : wanted});
+      saveConfig(widget.configDir, {'name': wanted.isEmpty ? null : wanted});
+      if (serviceInstalled()) {
+        await installService(_serviceConfig());
+      } else if (wasRunning) {
+        await _server.start();
+      }
+    } on Object catch (error) {
+      _fail(error);
+    }
+    await _refresh();
+  }
+
+  /// Points the server at another directory.
+  ///
+  /// A restart, because a database cannot be swapped under a running process.
+  /// The key is written to the config file at the *default* location — where
+  /// the server looks for it — and the database goes wherever the key says.
+  /// The file does not move with it; that is the rule that stops a `dir`
+  /// pointing anywhere from making the file that holds it unfindable.
+  ///
+  /// Config first, then the unit, in that order. The unit passes `--dir`,
+  /// which beats the file, so writing the file alone would leave the service
+  /// on the old directory and writing the unit alone would lose the choice for
+  /// every launch that is not the service. `ReadWritePaths` moves with it too,
+  /// or systemd's hardening refuses the new path and the server fails at the
+  /// next login in a log nobody has open.
+  ///
+  /// **Nothing is copied and nothing is deleted.** An empty directory is a new
+  /// library that no paired device knows about, which is a thing somebody may
+  /// genuinely want; moving an existing one is `mv` and a decision, not a side
+  /// effect of typing in a field.
+  Future<void> _relocate(String next) async {
+    final wanted = next.trim();
+    if (wanted.isEmpty || wanted == _dir) return;
+    try {
+      final wasRunning = await _server.running;
+      await _server.stop();
+
+      saveConfig(widget.configDir, {'dir': wanted});
+      setState(() {
+        _dir = wanted;
+        _server = SyncServer(
+          exe: _server.exe,
+          dir: wanted,
+          token: _server.token,
+          addr: _server.addr,
+        );
+        _compose = _server.exe == null
+            ? null
+            : composeFile(_server.exe!, wanted);
+      });
+
       if (serviceInstalled()) {
         await installService(_serviceConfig());
       } else if (wasRunning) {
@@ -230,7 +302,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       final wasRunning = await _server.running;
       await _server.stop();
       _server.addr = next;
-      saveConfig(widget.dir, {'http': next});
+      saveConfig(widget.configDir, {'http': next});
       if (serviceInstalled()) {
         await installService(_serviceConfig(addr: next));
       } else if (wasRunning) {
@@ -458,6 +530,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onResume: _resumeDevice,
     onRemove: _removeDevice,
     onName: _rename,
+    onDir: _relocate,
     onRunAs: _setRunAs,
   );
 }

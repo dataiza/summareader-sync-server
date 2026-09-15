@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -67,6 +68,20 @@ func main() {
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		registerRoutes(e)
+
+		// Which database this is, said out loud, once.
+		//
+		// The window asks where the library should go on its first run. A
+		// server started over ssh has nobody to ask, so it takes the default
+		// and says which one it took and who decided — that is the whole of
+		// the headless half of the same question. Before this, "the server
+		// answers perfectly and knows nothing" was a support conversation
+		// rather than a line in the log.
+		//
+		// e.App.DataDir() rather than the variable above, so this reports
+		// what PocketBase actually opened, including an explicit --dir that
+		// cobra parsed after the default was computed.
+		log.Printf("library in %s (%s)", e.App.DataDir(), dataDirDecidedBy())
 
 		// Findable on a local network, so self-hosting does not begin with
 		// reading an IP address off a router. Only ever a convenience: the
@@ -159,12 +174,76 @@ func isServe(args []string) bool {
 	return false
 }
 
+// Where the database goes when nobody says.
+//
+// The **data** directory, not the config one. This used to be
+// os.UserConfigDir(), which put a SQLite database holding an account and every
+// device token under ~/.config — a directory meant for small editable files
+// you would happily keep in version control. Meanwhile scripts/install.sh has
+// always used ~/.local/share, and run.sh and both compose files use ./pb_data,
+// so the systemd install, the window and a bare binary each opened a different
+// database and nothing anywhere said so.
+//
+// Go has no os.UserDataDir, and adding a dependency for eight lines is the
+// wrong trade. Darwin and Windows have no separate data location worth the
+// name — ~/Library/Application Support and %AppData% are where both belong —
+// so those reuse os.UserConfigDir()'s answer, and only Linux differs. On macOS
+// that makes the new default identical to the old one, which is the tidiest
+// possible migration: there is not one.
+//
+// Empty only when there is no home directory at all, which PocketBase answers
+// with ./pb_data beside the executable.
 func defaultDataDir() string {
+	if dir := xdgDataHome(); dir != "" {
+		return filepath.Join(dir, "summareader-sync")
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(base, "summareader-sync")
+}
+
+// Who chose the data directory, for the line printed at startup.
+//
+// Not a value, a provenance: "it is here" answers half the question somebody
+// asks when a library looks empty, and "because the config file says so"
+// answers the other half — which is the one that tells them where to go and
+// change it.
+//
+// --dir is not distinguished from the default here. It is on the command line
+// somebody just typed, so it is the one source that needs no explaining.
+func dataDirDecidedBy() string {
+	switch {
+	case os.Getenv("SUMMAREADER_DIR") != "":
+		return "SUMMAREADER_DIR"
+	case settings.Dir != "":
+		return "the config file"
+	default:
+		return "the default"
+	}
+}
+
+// XDG_DATA_HOME, or the ~/.local/share the spec says to assume, on the
+// platforms where that means anything. Empty everywhere else, so the caller
+// falls back.
+//
+// A relative XDG_DATA_HOME is ignored rather than honoured: the specification
+// says it must be absolute, and resolving a relative one against the working
+// directory is how a server started from two different shells ends up with two
+// databases.
+func xdgDataHome() string {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return ""
+	}
+	if set := os.Getenv("XDG_DATA_HOME"); filepath.IsAbs(set) {
+		return set
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share")
 }
 
 // The five operations, frozen.

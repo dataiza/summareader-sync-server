@@ -130,6 +130,7 @@ class ConsoleView extends StatefulWidget {
     this.onResume,
     this.onRemove,
     this.onName,
+    this.onDir,
   });
 
   final ConsoleState state;
@@ -148,6 +149,11 @@ class ConsoleView extends StatefulWidget {
   final ValueChanged<PairedDevice>? onRevoke;
   final ValueChanged<PairedDevice>? onResume;
   final ValueChanged<PairedDevice>? onRemove;
+
+  /// Where the database goes. Editable now: it was a line of text saying "set
+  /// with --dir at launch", on a window whose whole job is to be the way you
+  /// do that without a launch.
+  final ValueChanged<String>? onDir;
   final ValueChanged<String>? onName;
 
   @override
@@ -182,7 +188,16 @@ class _ConsoleViewState extends State<ConsoleView> {
       'SummaReader Sync Server',
       'Your own library, on your own machine. Nothing here can read what it '
           'holds.',
-      trailing: _menu(),
+      // A button, not a menu. It was a MenuAnchor holding exactly one item,
+      // which is a menu that should not exist — and the app spells this same
+      // control as a plain pill: label, Icons.tune, and a Close beside the
+      // title to come back (lib/src/ui/shell.dart).
+      trailing: PillButton(
+        label: 'Configuration',
+        icon: Icons.tune,
+        height: 36,
+        onTap: () => setState(() => _settings = true),
+      ),
     ),
     _status(),
     _devices(),
@@ -190,11 +205,11 @@ class _ConsoleViewState extends State<ConsoleView> {
 
   Widget _settingsPage() => _page([
     _topBar(
-      'Settings',
-      'What the server is called, where it listens, and whether it comes back '
-          'after a reboot.',
+      'Configuration',
+      'Where the library is kept, what the server is called, where it listens, '
+          'and whether it comes back after a reboot.',
       leading: PillButton(
-        label: 'Back',
+        label: 'Close',
         icon: Icons.arrow_back,
         height: 36,
         onTap: () => setState(() => _settings = false),
@@ -292,26 +307,6 @@ class _ConsoleViewState extends State<ConsoleView> {
   );
 
   /// The top bar's menu.
-  ///
-  /// Material's own rather than the design package's: that package draws
-  /// buttons, fields and switches and has never held a menu, and it is a copy
-  /// of the app's kept byte-identical, so one cannot be added from this side.
-  Widget _menu() => MenuAnchor(
-    menuChildren: [
-      MenuItemButton(
-        leadingIcon: const Icon(Icons.tune, size: 18),
-        onPressed: () => setState(() => _settings = true),
-        child: Text('Settings', style: Ar.bodyStyle(14)),
-      ),
-    ],
-    builder: (context, controller, _) => PillButton(
-      label: 'Menu',
-      icon: Icons.menu,
-      height: 36,
-      onTap: () => controller.isOpen ? controller.close() : controller.open(),
-    ),
-  );
-
   // The section shape the app uses everywhere: a heading, a line saying what
   // the group is for, and one card of rows.
   Widget _section(String title, String blurb, Widget child) => Padding(
@@ -607,12 +602,23 @@ class _ConsoleViewState extends State<ConsoleView> {
         ),
         _row(
           'Data directory',
-          Text(
-            state.dir,
-            textAlign: TextAlign.end,
-            style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+          SizedBox(
+            width: 320,
+            child: _DirField(dir: state.dir, onSubmitted: widget.onDir),
           ),
-          hint: 'Set with --dir at launch; not editable here.',
+          // What is actually at stake, said where the decision is made. The
+          // account and every device token are in this directory; pointing
+          // the server at an empty one is not a migration, it is a new
+          // library that no paired device knows about.
+          //
+          // The container caveat is real and not worth a mechanism: the unit
+          // this window writes for `docker compose` passes the bind address
+          // and the port and has never passed a directory, because the image
+          // serves /data and the compose file decides what that is.
+          hint:
+              'Restarts the server. The account and every device token live '
+              'here — a different directory is a different library, not a '
+              'move. Ignored when the service runs docker compose.',
         ),
       ]),
     );
@@ -688,6 +694,46 @@ class _NameFieldState extends State<_NameField> {
     controller: _controller,
     // The default it falls back to, shown rather than described.
     hint: 'Acme',
+    background: Ar.neutral100,
+    onSubmitted: widget.onSubmitted,
+  );
+}
+
+/// The data directory, in a field that keeps its own text.
+///
+/// The same shape as [_NameField] and [_PortField], and for the same reason:
+/// the poll rebuilds this tree twice a second and a bare controller loses the
+/// caret every time.
+///
+/// No folder browser, deliberately — neither this console nor the app has a
+/// picker dependency, and every other path in both is typed.
+class _DirField extends StatefulWidget {
+  const _DirField({required this.dir, this.onSubmitted});
+
+  final String dir;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<_DirField> createState() => _DirFieldState();
+}
+
+class _DirFieldState extends State<_DirField> {
+  late final _controller = TextEditingController(text: widget.dir);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ArField(
+    controller: _controller,
+    // No hint. [_NameField] shows the default it falls back to, which is
+    // useful because a name can be left empty; a directory cannot, so the
+    // field always holds one and a placeholder repeating it would be the same
+    // string twice. The row's own hint says what changing it costs.
+    fontSize: 12.5,
     background: Ar.neutral100,
     onSubmitted: widget.onSubmitted,
   );
