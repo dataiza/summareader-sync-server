@@ -123,7 +123,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       // One question at a time, and where the library goes is the more
       // important of the two: somebody answering that should not be handed a
       // second dialog on top of the first.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _offerTheMenu());
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _offerTheMenu();
+        await _offerToRepoint();
+      });
     }
 
     unawaited(_refresh());
@@ -325,7 +328,12 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     final image = runningImage();
     if (image == null) return;
     try {
-      final refusal = wanted ? await addToMenu(image) : await removeFromMenu();
+      // Moved somewhere it can stay before the entry names it. The entry
+      // holds an absolute path, and until this it named wherever the file
+      // happened to be when the question was answered — usually a downloads
+      // folder, which people empty.
+      final kept = wanted ? await keepImage(image) : image;
+      final refusal = wanted ? await addToMenu(kept) : await removeFromMenu();
       saveConfig(widget.configDir, {'in_menu': wanted});
       if (!mounted) return;
       setState(() {
@@ -336,6 +344,22 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       _fail(error);
     }
     await _refresh();
+  }
+
+  /// Offers to repoint a menu entry that names somewhere else.
+  ///
+  /// Somebody moved the file by hand, or is running a second copy. The entry
+  /// still names the old path, so the icon in their launcher starts nothing —
+  /// and this is the only moment anything can notice, because the program that
+  /// would have complained is the one that is not there.
+  Future<void> _offerToRepoint() async {
+    if (!mounted || !menuIsStale()) return;
+
+    final image = runningImage();
+    if (image == null) return;
+    final wanted = await askAboutARepoint(context, menuTarget() ?? '', image);
+    if (!mounted || !wanted) return;
+    await _setInMenu(true);
   }
 
   /// Offers the menu once, on a first run that is an AppImage.

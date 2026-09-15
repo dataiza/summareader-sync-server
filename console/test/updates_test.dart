@@ -231,4 +231,59 @@ void main() {
       );
     });
   });
+
+  group('keeping the image somewhere the menu can point', () {
+    late Directory home;
+    Map<String, String> env() => {'HOME': home.path};
+
+    setUp(() => home = Directory.systemTemp.createTempSync('keep'));
+    tearDown(() => home.deleteSync(recursive: true));
+
+    test('it moves out of downloads, and does not stay behind', () async {
+      // Moved and not copied: two copies of a program that each replace
+      // themselves from GitHub are two programs a month later.
+      final downloads = Directory('${home.path}/Downloads')..createSync();
+      final image = File('${downloads.path}/X.AppImage')
+        ..writeAsStringSync('an image');
+
+      final kept = await keepImage(image.path, environment: env());
+
+      expect(kept, '${home.path}/Applications/X.AppImage');
+      expect(File(kept).readAsStringSync(), 'an image');
+      expect(image.existsSync(), isFalse, reason: 'one file, not two');
+    });
+
+    test('one already in place is left exactly where it is', () async {
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final image = File('${apps.path}/X.AppImage')..writeAsStringSync('x');
+
+      expect(await keepImage(image.path, environment: env()), image.path);
+      expect(image.existsSync(), isTrue);
+    });
+
+    test('the entry names where it ended up, not where it was', () async {
+      // The whole point: the path in the entry has to survive somebody
+      // emptying their downloads folder.
+      final downloads = Directory('${home.path}/Downloads')..createSync();
+      final image = File('${downloads.path}/X.AppImage')
+        ..writeAsStringSync('an image');
+
+      final kept = await keepImage(image.path, environment: env());
+      await addToMenu(kept, environment: env());
+
+      expect(menuTarget(env()), kept);
+      expect(menuTarget(env()), isNot(contains('Downloads')));
+    });
+
+    test('a stale entry is noticed, and a matching one is not', () {
+      final apps = Directory('${home.path}/Applications')..createSync();
+      File('${apps.path}/X.AppImage').writeAsStringSync('x');
+
+      // Nothing added yet: nothing can be stale.
+      expect(
+        menuIsStale({...env(), 'APPIMAGE': '${apps.path}/X.AppImage'}),
+        isFalse,
+      );
+    });
+  });
 }

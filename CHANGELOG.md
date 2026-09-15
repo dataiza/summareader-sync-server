@@ -3,6 +3,26 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.1
+
+### The menu entry survives tidying your downloads
+
+Adding the console to the applications menu wrote the path the AppImage had at
+that moment — which is the downloads folder, because that is where a file you
+just downloaded is. Empty that folder, as people do, and the icon in the
+launcher starts nothing at all.
+
+It moves the image to `~/Applications` first now, which is where AppImages
+conventionally live, and the entry names it there. **Moved, not copied**: two
+copies of a program that each replace themselves from GitHub are two programs a
+month later, and which one runs depends on which icon was clicked. The dialog
+says so before it does it.
+
+And if the entry already names somewhere else — the file was moved by hand, or
+a second copy is being run — the console says so on launch and offers to point
+it here. That is the only moment anything is in a position to notice, because
+the program that would have complained is the one that is not there.
+
 ## 0.3.0
 
 ### An AppImage for Linux, that updates itself

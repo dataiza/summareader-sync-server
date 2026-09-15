@@ -13,6 +13,8 @@ library;
 
 import 'dart:io';
 
+import 'updates.dart';
+
 /// The GTK application id, which is also what the files are named after.
 ///
 /// It has to match `APPLICATION_ID` in linux/CMakeLists.txt or the window is
@@ -40,10 +42,70 @@ bool isInMenu([Map<String, String>? environment]) =>
 /// The sizes written, which are the ones the AppImage carries.
 const _sizes = [16, 32, 48, 64, 128, 256, 512];
 
+/// Where an AppImage lives once somebody has decided to keep it.
+///
+/// `~/Applications` is the convention — AppImageLauncher puts them there and
+/// some desktops already scan it — and it is not `~/.local/bin`, which is for
+/// things on PATH rather than for whole programs.
+String applicationsDir([Map<String, String>? environment]) =>
+    '${(environment ?? Platform.environment)['HOME'] ?? ''}/Applications';
+
+/// Moves the image somewhere the menu entry can keep pointing at.
+///
+/// The entry names an absolute path, and until this existed that path was
+/// wherever the file happened to be sitting when the question was answered —
+/// usually the downloads folder. Tidying that folder, which is a thing people
+/// do, left a launcher entry pointing at nothing.
+///
+/// **Moved and not copied.** Two copies of a program that can each replace
+/// itself from GitHub are two programs: a month later they are different
+/// versions, and which one runs depends on which icon was clicked. One file
+/// also means no second 18–40 MB.
+///
+/// A rename first, because within one filesystem it is atomic and instant. It
+/// fails across a mount point — a download on another disk — so that falls
+/// back to copy-then-delete, and if the delete fails the copy is still good
+/// and the original is merely still there.
+///
+/// Returns the path it now lives at, which is the old one when it was already
+/// in the right place or could not be moved at all.
+Future<String> keepImage(
+  String image, {
+  Map<String, String>? environment,
+}) async {
+  final home = Directory(applicationsDir(environment));
+  final target = '${home.path}/${image.split('/').last}';
+  if (image == target) return image;
+
+  try {
+    await home.create(recursive: true);
+    final source = File(image);
+    try {
+      return (await source.rename(target)).path;
+    } on FileSystemException {
+      final copied = await source.copy(target);
+      try {
+        await source.delete();
+      } on FileSystemException {
+        // Copied but not removed: a read-only download directory, or a file
+        // somebody else owns. The menu entry points at the copy, which is the
+        // part that matters, and the original is where they left it.
+      }
+      return copied.path;
+    }
+  } on FileSystemException {
+    // No ~/Applications and none can be made. Point at the image where it is,
+    // which is what happened before this existed.
+    return image;
+  }
+}
+
 /// Writes the entry and the icons.
 ///
-/// [image] is the AppImage's own path — `Exec` has to name the file somebody
-/// downloaded, wherever they put it, because there is nothing else to run.
+/// [image] is the AppImage's own path. Pass it through [keepImage] first: the
+/// entry names an absolute path and has to keep being right after somebody
+/// empties their downloads folder.
+///
 /// Returns null when it worked and a sentence when it did not.
 Future<String?> addToMenu(
   String image, {
@@ -145,4 +207,31 @@ Future<void> _refreshCaches([Map<String, String>? environment]) async {
       // Not installed. See above.
     }
   }
+}
+
+/// The path the menu entry currently names, or null when there is no entry.
+///
+/// Read back rather than remembered, because the thing that goes stale is the
+/// file on disk and the file on disk is the truth about it.
+String? menuTarget([Map<String, String>? environment]) {
+  final entry = File(desktopFilePath(environment));
+  if (!entry.existsSync()) return null;
+  for (final line in entry.readAsLinesSync()) {
+    if (line.startsWith('Exec=')) {
+      return line.substring(5).replaceAll(r'\ ', ' ');
+    }
+  }
+  return null;
+}
+
+/// Whether the menu entry points somewhere other than the image that is
+/// running.
+///
+/// True after somebody moves the file by hand, or runs a second copy from
+/// elsewhere. False when there is no entry at all — nothing is stale if
+/// nothing was ever added.
+bool menuIsStale([Map<String, String>? environment]) {
+  final named = menuTarget(environment);
+  final running = runningImage(environment);
+  return named != null && running != null && named != running;
 }

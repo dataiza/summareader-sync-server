@@ -184,15 +184,18 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
         children: [
           Text(
             'This is a single file you downloaded, so nothing has told your '
-            'desktop about it. Adding it writes a launcher entry and icons '
-            'into ~/.local/share — no root, nothing outside your home, and '
-            'reversible from Configuration.',
+            'desktop about it. Adding it moves this file to ~/Applications and '
+            'writes a launcher entry and icons into ~/.local/share — no root, '
+            'nothing outside your home, and reversible from Configuration.',
             style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
           ),
           const SizedBox(height: 12),
           Text(
-            'Leave it out and this keeps working exactly as it does now: run '
-            'the file. You will not be asked again either way.',
+            'It is moved rather than copied so that there is one of it: two '
+            'copies both update themselves, and a month later they are '
+            'different versions. Leave it out and this keeps working exactly '
+            'as it does now: run the file where it is. You will not be asked '
+            'again either way.',
             style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
           ),
           const SizedBox(height: 18),
@@ -206,6 +209,74 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
               const SizedBox(width: 9),
               PrimaryButton(
                 label: 'Add it',
+                onTap: () {
+                  wanted = true;
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  return wanted;
+}
+
+/// Offers to repoint a menu entry that names a file somewhere else.
+///
+/// Asked rather than done, on the same grounds as adding it in the first
+/// place: this rewrites a file in somebody's home, and the launch it happens
+/// on has nothing to do with the menu as far as they are concerned.
+Future<bool> askAboutARepoint(
+  BuildContext context,
+  String named,
+  String running,
+) async {
+  var wanted = false;
+
+  await showConsoleDialog(
+    context,
+    'The menu entry points somewhere else',
+    Builder(
+      builder: (dialogContext) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Your applications menu starts this from:',
+            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          ),
+          const SizedBox(height: 6),
+          SelectableText(named, style: Ar.bodyStyle(12.5, color: Ar.dim(0.6))),
+          const SizedBox(height: 12),
+          Text(
+            'and you are running this one:',
+            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            running,
+            style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'If the first one is gone, the icon in your launcher starts '
+            'nothing at all. Pointing it here fixes that.',
+            style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(
+                label: 'Leave it',
+                onTap: () => Navigator.of(dialogContext).pop(),
+              ),
+              const SizedBox(width: 9),
+              PrimaryButton(
+                label: 'Point it here',
                 onTap: () {
                   wanted = true;
                   Navigator.of(dialogContext).pop();
