@@ -480,6 +480,36 @@ void _theTwoPages() {
       expect(find.text('Devices'), findsOneWidget);
     });
 
+    testWidgets('an AppImage is not offered a service it cannot write', (
+      tester,
+    ) async {
+      // The unit's ExecStart would name the server inside this image's mount:
+      // a path that is gone the moment the window closes, and a different one
+      // every launch. So the switch is absent, and the section that replaces
+      // it says where a service does come from.
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: ConsoleState(
+                dir: '/data',
+                addr: '127.0.0.1:8099',
+                serverBinary: '/tmp/.mount_x/usr/bin/summareader-sync',
+                updatable: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Start at login'), findsNothing);
+      expect(find.text('Keep it running'), findsNothing);
+      expect(find.text('Without this window'), findsOneWidget);
+      expect(find.text('Check for updates'), findsOneWidget);
+    });
+
     testWidgets('the data directory can be typed into now', (tester) async {
       // It was a line of text reading "set with --dir at launch", in a window
       // whose whole purpose is to be the way that is done without a launch.

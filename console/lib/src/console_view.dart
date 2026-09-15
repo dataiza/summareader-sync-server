@@ -246,7 +246,12 @@ class _ConsoleViewState extends State<ConsoleView> {
         ]),
       ),
     _address(),
-    if (state.linux) _atLogin(),
+    // Not in an AppImage. The unit's ExecStart would name the server binary
+    // inside this image's mount — a path that exists only while this window
+    // is open, and a different one every launch — so the switch would write a
+    // service that cannot start. The headless install is the answer there,
+    // and _thisProgram says so.
+    if (state.linux && !state.updatable) _atLogin(),
     if (state.updatable) _thisProgram(),
   ]);
 
@@ -334,12 +339,27 @@ class _ConsoleViewState extends State<ConsoleView> {
         'it, so keeping itself current is something it has to do for itself.',
     _card([
       _row(
+        'Without this window',
+        Text('install.sh', style: Ar.bodyStyle(13, color: Ar.dim(0.75))),
+        hint:
+            'An AppImage carries the server inside itself, at a path that '
+            'exists only while this window is open — so it cannot be a '
+            'service. Keeping the server up after a reboot is the headless '
+            'install: scripts/install.sh from the release, which writes the '
+            'unit around a binary that stays put.',
+      ),
+      _row(
         'This console',
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        // Wrapped, not a Row: the version and the button together are wider
+        // than the right-hand half of a narrow window, and a Row there simply
+        // paints past the edge of the card.
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(consoleVersion, style: Ar.bodyStyle(13, color: Ar.dim(0.75))),
-            const SizedBox(width: 12),
             PillButton(
               label: 'Check for updates',
               icon: Icons.download_outlined,

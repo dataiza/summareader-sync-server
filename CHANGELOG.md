@@ -3,6 +3,24 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.4
+
+### Start at login is not offered inside an AppImage
+
+The unit it writes names the server binary *inside the image's mount*: a path
+that exists only while the window is open, and a different one at every launch.
+So the switch wrote a service that could not start, on the one build where it
+looked most like the obvious thing to press.
+
+It is absent there. **This program** says where a service does come from
+instead — `scripts/install.sh` from the release, which writes the unit around a
+binary that stays put — and the section keeps *Check for updates*.
+
+### Fixed
+
+- The version and **Check for updates** no longer paint past the edge of their
+  card in a narrow window; they wrap.
+
 ## 0.3.3
 
 ### Check for updates was there for two seconds

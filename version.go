@@ -17,7 +17,7 @@ import (
 //
 // Bump it in the same commit as the CHANGELOG section it names, and tag that
 // commit `v<version>`.
-const version = "0.3.3"
+const version = "0.3.4"
 
 // Where the build came from, when there is anything to say.
 //
