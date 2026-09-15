@@ -19,3 +19,4 @@ console/macos/Flutter/ephemeral/
 # A real config, beside a real database. The example is the one that is
 # committed.
 summareader-sync.json
+out/

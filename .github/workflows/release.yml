@@ -1,0 +1,213 @@
+name: Release
+
+# The builds somebody can download, and the public release they land in.
+#
+# Separate from ci.yml because these only matter when something is being
+# shipped: a tag, not a commit. `workflow_dispatch` is here so a build can be
+# debugged without spending a tag — it builds everything and publishes nothing,
+# because the publish step needs a tag to name the release after.
+#
+# **There is no private draft here.** The app's release workflow has one
+# because its premium build must never reach a public repository; this server
+# has one product and it is free software, so the release is created in
+# dataiza/summareader-sync-server-release as a draft, filled by the build jobs,
+# and un-drafted at the end. One copy of every file, uploaded once.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+# Deliberately no `concurrency` group: a release build must never be cancelled
+# by whatever is pushed next.
+
+env:
+  # The public repository. Named once; every job that writes to it reads this.
+  RELEASE_REPO: dataiza/summareader-sync-server-release
+
+jobs:
+  # Everything that can be wrong before a single byte is compiled: the tag
+  # against version.go, the changelog section, and the token that the other
+  # repository needs. Discovering any of these after four builds have run is
+  # the same failure an hour later.
+  open:
+    name: Open the release
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The version, and the tag that must match it
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^const version = "\(.*\)"$/\1/p' version.go)
+          if [ -z "$version" ]; then
+            echo '::error::version.go has no version constant'
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "version.go says $version"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version.go $version"
+            exit 1
+          fi
+
+      - name: Release notes from the changelog
+        run: |
+          set -euo pipefail
+          heading="## ${{ steps.version.outputs.version }}"
+          awk -v h="$heading" '$0 == h {f=1; next} f && /^## / {exit} f' \
+            CHANGELOG.md >notes.md
+          # An empty body would publish a release that says nothing about
+          # itself. go test guards this too, on every commit; this is the
+          # second half of the same check, at the moment it becomes public.
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $heading"
+            exit 1
+          fi
+          cat notes.md
+
+      - name: The public repository needs a token of its own
+        env:
+          TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::RELEASE_REPO_TOKEN is empty — GITHUB_TOKEN cannot write to another repository."
+            exit 1
+          fi
+
+      # A draft, so nothing is downloadable while it fills up. The tag does not
+      # exist in the other repository; `gh release create` makes it, pointing
+      # at that repository's default branch.
+      - name: Create it, or reuse the one a previous attempt left
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            # Re-running failed jobs must not replace a draft that already
+            # holds the assets from the jobs that passed.
+            echo "::notice::reusing the existing draft for $GITHUB_REF_NAME"
+            gh release edit "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+              --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+              --draft --title "$GITHUB_REF_NAME" --notes-file notes.md
+          fi
+
+  # Every platform's server, packaged with everything needed to run it as one.
+  #
+  # One job for all of them: no cgo, no build tags, so this machine builds the
+  # binary for five targets with no C compiler anywhere. That is the property
+  # the whole deployment story rests on, and it is worth one job rather than a
+  # matrix of five runners doing one `go build` each.
+  headless:
+    name: Headless bundles
+    needs: open
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - name: Build and package
+        # The packaging is a script in the repository rather than steps here,
+        # so it can be run — and got wrong — on a desktop rather than on a tag.
+        run: scripts/package-release.sh headless
+
+      - name: Into the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --clobber so re-running a failed job replaces its own files rather
+          # than failing on ones a previous attempt already uploaded.
+          gh release upload "$GITHUB_REF_NAME" out/* \
+            --repo "$RELEASE_REPO" --clobber
+
+  # The window, for the two platforms there is a runner for. A Flutter desktop
+  # build is the machine it was built on — there is no cross-compiling here,
+  # which is why this is a matrix over runners rather than over targets.
+  console:
+    name: Console (${{ matrix.os }})
+    needs: open
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      # One platform failing should not hide whether the other builds.
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+          - os: macos
+            runner: ${{ vars.RUNNER_MACOS || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: true
+
+      - name: System headers
+        # Only on a hosted runner: a self-hosted box has these already, and
+        # `sudo apt-get` on somebody's workstation is not this workflow's
+        # business.
+        if: matrix.os == 'linux' && runner.environment == 'github-hosted'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - name: Build and package
+        run: scripts/package-release.sh console ${{ matrix.os }}
+
+      - name: Into the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" out/* \
+            --repo "$RELEASE_REPO" --clobber
+
+  # The one job that builds nothing: it makes the release visible, once every
+  # build that was going to succeed has uploaded.
+  publish:
+    name: Publish
+    needs: [open, headless, console]
+    if: github.ref_type == 'tag'
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    steps:
+      - name: Check what is there, then un-draft it
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets=$(gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" \
+            --json assets --jq '.assets[].name')
+          echo "$assets"
+          # A release missing the platform somebody came for is worse than no
+          # release, and un-drafting is the point of no return: `latest` is
+          # what a download link reads, and it does not see drafts.
+          for want in headless-linux-amd64 console-linux-x64 console-macos; do
+            echo "$assets" | grep -q "$want" || {
+              echo "::error::nothing matching $want was uploaded"
+              exit 1
+            }
+          done
+          gh release edit "$GITHUB_REF_NAME" --repo "$RELEASE_REPO" --draft=false
+          echo "published: https://github.com/$RELEASE_REPO/releases/tag/$GITHUB_REF_NAME"

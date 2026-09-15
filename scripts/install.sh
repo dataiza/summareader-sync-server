@@ -15,7 +15,18 @@
 #   ADDR=…      what it listens on             (default 127.0.0.1:8099)
 set -euo pipefail
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Two layouts, one script. In a checkout this file is in scripts/ and the
+# repository is its parent; in a released headless bundle everything is flat
+# beside it. Told apart by whether the unit template is here or one level up,
+# because that is a file this script cannot work without either way.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$here/summareader-sync.service" ]; then
+  repo="$here"
+  unit_template="$here/summareader-sync.service"
+else
+  repo="$(cd "$here/.." && pwd)"
+  unit_template="$repo/scripts/summareader-sync.service"
+fi
 cd "$repo"
 
 # mise puts the toolchains on PATH from a login shell only, and this is a
@@ -85,7 +96,10 @@ mkdir -p "$bin_dir" "$unit_dir" "$data_dir"
 # the last build left in the repo — a machine that runs this server does not
 # have to be a machine that compiles it, and the Docker path builds elsewhere
 # on purpose.
-if command -v go >/dev/null 2>&1; then
+# `go.mod` and not just `command -v go`: a released bundle is a binary and no
+# source, and a machine that happens to have Go would otherwise try to compile
+# a directory with nothing in it to compile.
+if [ -f "$repo/go.mod" ] && command -v go >/dev/null 2>&1; then
   go build -o "$bin_dir/$name" .
 elif [ -x "$repo/$name" ]; then
   echo "No Go toolchain — installing the binary already in $repo."
@@ -93,13 +107,14 @@ elif [ -x "$repo/$name" ]; then
 else
   echo "No Go toolchain and no built binary in $repo." >&2
   echo "Install Go, or build it once: docker compose build" >&2
+  echo "A released headless bundle ships the binary beside this script." >&2
   exit 1
 fi
 
 sed -e "s|@BIN@|$bin_dir/$name|g" \
     -e "s|@DATA@|$data_dir|g" \
     -e "s|@ADDR@|$addr|g" \
-    scripts/$name.service >"$unit_dir/$name.service"
+    "$unit_template" >"$unit_dir/$name.service"
 
 systemctl --user daemon-reload
 systemctl --user enable --now "$name.service"

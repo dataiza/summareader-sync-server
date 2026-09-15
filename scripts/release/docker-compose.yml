@@ -1,0 +1,69 @@
+# A self-hosted SummaReader sync server, from a released bundle.
+#
+#   docker compose up -d
+#   docker compose exec sync summareader-sync first-device "My library" "Desktop" --dir=/data
+#
+# The second command prints a token once. Paste it into SummaReader on that
+# device; every device after it is enrolled from one already paired, with no
+# shell involved.
+#
+# The Dockerfile beside this one copies the binary in the bundle rather than
+# compiling anything, so `up -d` needs no Go and no source.
+
+services:
+  sync:
+    build: .
+    image: summareader-sync:release
+    restart: unless-stopped
+
+    ports:
+      # Loopback by default, which is the one default that cannot be wrong on
+      # a machine nobody described to us: it reaches the app here and nothing
+      # else. The repository's compose file names a LAN address instead, and
+      # that address is the author's — it would fail to bind on yours.
+      #
+      # To sync a phone, name the interface that is supposed to reach it:
+      # `SYNC_BIND=192.168.1.10 docker compose up -d`, or put it in a `.env`
+      # file beside this one. Naming an interface rather than using 0.0.0.0
+      # keeps the server off every other network the machine is on.
+      #
+      # It is plain HTTP carrying device tokens. On a network you control that
+      # is the ordinary way to sync a phone; anywhere less private it wants a
+      # TLS terminator in front and this left as loopback.
+      - "${SYNC_BIND:-127.0.0.1}:${SYNC_PORT:-8099}:8099"
+      # Uncomment to keep loopback as well when SYNC_BIND names something
+      # else. Leaving it uncommented with SYNC_BIND unset asks Docker to
+      # publish the same address twice, which it refuses.
+      # - "127.0.0.1:${SYNC_PORT:-8099}:8099"
+
+    environment:
+      # Off unless something sets it, exactly as outside Docker: the endpoints
+      # it guards 404 without a token.
+      SUMMAREADER_METRICS_TOKEN: "${SUMMAREADER_METRICS_TOKEN:-}"
+      SUMMAREADER_OPERATOR_TOKEN: "${SUMMAREADER_OPERATOR_TOKEN:-}"
+
+    # The container writes as whoever owns ./pb_data, so the same database
+    # works whether the server is run in Docker or straight from the host.
+    # Override when that is not this user.
+    user: "${SYNC_UID:-1000}:${SYNC_GID:-1000}"
+
+    volumes:
+      # Everything worth keeping. Losing this is losing every device's token
+      # and the account they share — not the libraries themselves, which live
+      # on the devices.
+      - ./pb_data:/data
+
+    healthcheck:
+      # /instance needs no token, which is what makes it usable here: it
+      # answers exactly when the server is able to answer.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8099/instance"]
+      interval: 30s
+      timeout: 5s
+      # Generous, because the first start creates the database and runs the
+      # schema migration before anything answers.
+      start_period: 30s
+      retries: 3
+
+    # The server holds ciphertext and needs no privileges to do it.
+    security_opt:
+      - no-new-privileges:true

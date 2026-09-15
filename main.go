@@ -636,6 +636,7 @@ func registerCommands(app *pocketbase.PocketBase) {
 	pair.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON")
 
 	app.RootCmd.AddCommand(pair)
+	app.RootCmd.AddCommand(versionCommand())
 
 	registerDeviceCommands(app)
 }
