@@ -93,6 +93,31 @@ class GitHubUpdates implements Updates {
   }
 }
 
+/// Starts the image again and leaves.
+///
+/// The new version is on disk and the old one is the process you are looking
+/// at — the kernel is holding it open by its inode, which is precisely why
+/// replacing it was safe. Nothing changes until it is started again, so the
+/// honest end of an update is a button that does it.
+///
+/// Detached, so the new process is not a child that dies with this one, and
+/// then this process exits. What is not done here is anything clever about
+/// saving: this console writes as it goes, so there is no document to flush.
+///
+/// Returns a sentence when it could not start — a moved file, a permission —
+/// and never returns at all when it could.
+Future<String?> restartInto(String image) async {
+  try {
+    await Process.start(image, const [], mode: ProcessStartMode.detached);
+  } on ProcessException catch (error) {
+    return 'Could not start $image (${error.message}). Start it yourself.';
+  }
+  // A moment for the new process to be on its way before this one goes; the
+  // AppImage runtime mounts before it execs, and a mount is not instant.
+  await Future<void>.delayed(const Duration(milliseconds: 200));
+  exit(0);
+}
+
 /// Whether [offered] is a later version than [mine].
 ///
 /// By components and not by string order: `0.10.0` is later than `0.9.0` and

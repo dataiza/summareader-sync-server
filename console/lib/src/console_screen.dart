@@ -361,15 +361,16 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       // The filename carries the version and the swap wrote the new program
       // into the old path, so without this last month's number sits in the
       // name of this month's program — and the menu entry names it.
-      if (refusal == null) {
-        await nameForVersion(runningImage()!, release.version);
-      }
+      final now = refusal == null
+          ? await nameForVersion(runningImage()!, release.version)
+          : null;
       if (!mounted) return;
       setState(() {
         _state = _state.withUpdate(
           offer: null,
           said:
               refusal ?? '${release.version} is in place — restart to use it.',
+          installed: now,
         );
       });
     } on Object catch (error) {

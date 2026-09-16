@@ -36,11 +36,17 @@ class ConsoleState {
     this.updatable = false,
     this.updateOffer,
     this.updateSaid,
+    this.updateInstalled,
   });
 
   /// A newer release, found and not yet accepted. Replacing the program
   /// somebody is running is not something to do because they pressed "check".
   final Release? updateOffer;
+
+  /// Where the new version is, once it is in place. The old one is still the
+  /// process on screen, so the honest end of an update is a button that
+  /// starts the new one.
+  final String? updateInstalled;
 
   /// What the check or the download is doing, or what it did. A line rather
   /// than a message that fades: a download is a minute long, and the sentence
@@ -106,8 +112,16 @@ class ConsoleState {
 
   /// The two halves of the update flow, which move together: an offer with no
   /// line under it, a line with no offer, or neither.
-  ConsoleState withUpdate({required Release? offer, required String? said}) =>
-      _copy(updateOffer: offer, updateSaid: said, keepUpdate: false);
+  ConsoleState withUpdate({
+    required Release? offer,
+    required String? said,
+    String? installed,
+  }) => _copy(
+    updateOffer: offer,
+    updateSaid: said,
+    updateInstalled: installed,
+    keepUpdate: false,
+  );
 
   ConsoleState _copy({
     bool? docker,
@@ -115,6 +129,7 @@ class ConsoleState {
     bool keepError = true,
     Release? updateOffer,
     String? updateSaid,
+    String? updateInstalled,
     bool keepUpdate = true,
   }) => ConsoleState(
     dir: dir,
@@ -174,6 +189,7 @@ class ConsoleView extends StatefulWidget {
     this.onCheckUpdates,
     this.onDownloadUpdate,
     this.onDismissUpdate,
+    this.onRestart,
   });
 
   final ConsoleState state;
@@ -205,6 +221,9 @@ class ConsoleView extends StatefulWidget {
   /// Accept the offered release, and put the offer away again.
   final ValueChanged<Release>? onDownloadUpdate;
   final VoidCallback? onDismissUpdate;
+
+  /// Start the new version and leave. Only offered once there is one.
+  final VoidCallback? onRestart;
   final ValueChanged<String>? onName;
 
   @override
@@ -435,7 +454,17 @@ class _ConsoleViewState extends State<ConsoleView> {
         ),
       // What it is doing, or what it did.
       if (state.updateSaid case final said?)
-        _row(said, const SizedBox.shrink()),
+        _row(
+          said,
+          state.updateInstalled == null
+              ? const SizedBox.shrink()
+              : PillButton(
+                  label: 'Restart now',
+                  icon: Icons.restart_alt,
+                  height: 34,
+                  onTap: widget.onRestart,
+                ),
+        ),
     ]),
   );
 

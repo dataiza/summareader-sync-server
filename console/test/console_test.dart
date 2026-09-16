@@ -511,6 +511,8 @@ void _theTwoPages() {
 
       expect(find.text('9.9.9 is available'), findsOneWidget);
       expect(find.text('Downloading… 42%'), findsOneWidget);
+      // Nothing to restart into until something is in place.
+      expect(find.text('Restart now'), findsNothing);
 
       await tester.ensureVisible(find.text('Download'));
       await tester.pumpAndSettle();
