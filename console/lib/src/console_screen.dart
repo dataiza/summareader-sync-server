@@ -190,8 +190,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         error: _state.error,
         // Rebuilt here every two seconds, so anything left out of this list is
         // a thing that shows at launch and disappears. Check for updates did
-        // exactly that.
+        // exactly that, and a download's progress line would do it twice a
+        // second.
         updatable: _updatable,
+        updateOffer: _state.updateOffer,
+        updateSaid: _state.updateSaid,
       );
     });
   }
@@ -296,25 +299,73 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// Both halves report through the error line the rest of this screen uses,
   /// so a forty-megabyte download with no sign of life does not read as a
   /// window that has hung.
+  /// Asks GitHub what the newest release is. Finding one does not install it.
+  ///
+  /// Replacing the program somebody is running is the one control on this page
+  /// that changes this program, and it used to happen because they pressed
+  /// "check". Now it is a sentence and two buttons.
   Future<void> _checkUpdates() async {
-    setState(() => _state = _state.withError('Checking…'));
+    setState(() {
+      _state = _state.withUpdate(
+        offer: null,
+        said: 'Checking for a newer release…',
+      );
+    });
     try {
       final found = await const GitHubUpdates().newer();
       if (!mounted) return;
-      if (found == null) {
-        setState(
-          () => _state = _state.withError('This is the newest release.'),
+      setState(() {
+        _state = _state.withUpdate(
+          offer: found,
+          said: found == null ? 'This is the newest release.' : null,
         );
-        return;
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _state = _state.withUpdate(offer: null, said: '$error'));
       }
+    }
+  }
 
-      final refusal = await replaceRunningImage(found);
-      if (!mounted) return;
-      setState(
-        () => _state = _state.withError(
-          refusal ?? 'Updated to ${found.version}. Restart to use it.',
-        ),
+  /// Fetches the accepted release and puts it where this image is.
+  ///
+  /// The progress line is the point: forty megabytes over a slow connection is
+  /// a minute of a window that would otherwise look as though it had stopped.
+  Future<void> _downloadUpdate(Release release) async {
+    setState(() {
+      _state = _state.withUpdate(
+        offer: null,
+        said: 'Downloading ${release.version}…',
       );
+    });
+    // Redrawn on a whole percent rather than on every chunk: a setState per
+    // eight kilobytes is thousands of frames to move a number that has not
+    // changed.
+    var shown = -1;
+    try {
+      final refusal = await replaceRunningImage(
+        release,
+        onProgress: (received, total) {
+          if (!mounted || total == null || total <= 0) return;
+          final percent = (received * 100 ~/ total).clamp(0, 100);
+          if (percent == shown) return;
+          shown = percent;
+          setState(() {
+            _state = _state.withUpdate(
+              offer: null,
+              said: 'Downloading… $percent%',
+            );
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _state = _state.withUpdate(
+          offer: null,
+          said:
+              refusal ?? '${release.version} is in place — restart to use it.',
+        );
+      });
     } on Object catch (error) {
       if (mounted) _fail(error);
     }
@@ -699,6 +750,9 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onName: _rename,
     onDir: _relocate,
     onCheckUpdates: _checkUpdates,
+    onDownloadUpdate: _downloadUpdate,
+    onDismissUpdate: () =>
+        setState(() => _state = _state.withUpdate(offer: null, said: null)),
     onRunAs: _setRunAs,
   );
 }

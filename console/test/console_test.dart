@@ -7,6 +7,7 @@ import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
+import 'package:summareader_sync_console/src/updates.dart';
 import 'package:summareader_sync_console/src/first_run.dart';
 import 'package:summareader_sync_console/src/format.dart';
 import 'package:summareader_sync_console/src/pairing.dart';
@@ -478,6 +479,44 @@ void _theTwoPages() {
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('Devices'), findsOneWidget);
+    });
+
+    testWidgets('a found release is offered, not installed', (tester) async {
+      // Replacing the program somebody is running is the one control on this
+      // page that changes this program, and it used to happen because they
+      // pressed "check".
+      Release? asked;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: ConsoleState(
+                dir: '/data',
+                addr: '127.0.0.1:8099',
+                serverBinary: '/bin/summareader-sync',
+                updatable: true,
+                updateOffer: (
+                  version: '9.9.9',
+                  image: Uri.parse('https://example.invalid/x.AppImage'),
+                ),
+                updateSaid: 'Downloading… 42%',
+              ),
+              onDownloadUpdate: (release) => asked = release,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('9.9.9 is available'), findsOneWidget);
+      expect(find.text('Downloading… 42%'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Download'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Download'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(asked?.version, '9.9.9');
     });
 
     testWidgets('an AppImage is not offered a service it cannot write', (

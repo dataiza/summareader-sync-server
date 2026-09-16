@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 
 import 'addresses.dart';
+import 'updates.dart';
 import 'version.dart';
 import 'format.dart';
 import 'pairing.dart';
@@ -33,7 +34,18 @@ class ConsoleState {
     this.serverBinary,
     this.error,
     this.updatable = false,
+    this.updateOffer,
+    this.updateSaid,
   });
+
+  /// A newer release, found and not yet accepted. Replacing the program
+  /// somebody is running is not something to do because they pressed "check".
+  final Release? updateOffer;
+
+  /// What the check or the download is doing, or what it did. A line rather
+  /// than a message that fades: a download is a minute long, and the sentence
+  /// about restarting is worth still being there afterwards.
+  final String? updateSaid;
 
   /// Whether this console can update and register itself — true only when it
   /// is running as an AppImage, which is the one form that is a single file it
@@ -92,28 +104,45 @@ class ConsoleState {
 
   ConsoleState withDocker(bool value) => _copy(docker: value);
 
-  ConsoleState _copy({bool? docker, String? error, bool keepError = true}) =>
-      ConsoleState(
-        dir: dir,
-        addr: addr,
-        running: running,
-        managed: managed,
-        devices: devices,
-        entries: entries,
-        bytes: bytes,
-        paired: paired,
-        hosts: hosts,
-        atLogin: atLogin,
-        docker: docker ?? this.docker,
-        compose: compose,
-        linux: linux,
-        serverBinary: serverBinary,
-        error: keepError ? this.error : error,
-        // Carried, not defaulted. Left out of this list they would reset to
-        // false on every withError — the section would vanish the first time
-        // anything failed, which is exactly when somebody is looking at it.
-        updatable: updatable,
-      );
+  /// The two halves of the update flow, which move together: an offer with no
+  /// line under it, a line with no offer, or neither.
+  ConsoleState withUpdate({required Release? offer, required String? said}) =>
+      _copy(updateOffer: offer, updateSaid: said, keepUpdate: false);
+
+  ConsoleState _copy({
+    bool? docker,
+    String? error,
+    bool keepError = true,
+    Release? updateOffer,
+    String? updateSaid,
+    bool keepUpdate = true,
+  }) => ConsoleState(
+    dir: dir,
+    addr: addr,
+    running: running,
+    managed: managed,
+    devices: devices,
+    entries: entries,
+    bytes: bytes,
+    paired: paired,
+    hosts: hosts,
+    atLogin: atLogin,
+    docker: docker ?? this.docker,
+    compose: compose,
+    linux: linux,
+    serverBinary: serverBinary,
+    error: keepError ? this.error : error,
+    // Carried, not defaulted. Left out of this list they would reset to
+    // false on every withError — the section would vanish the first time
+    // anything failed, which is exactly when somebody is looking at it.
+    updatable: updatable,
+    // Carried through every other copy, for the same reason `updatable`
+    // is: left out, a download's progress line would vanish the moment
+    // anything else touched the state — and the poll touches it twice a
+    // second.
+    updateOffer: keepUpdate ? this.updateOffer : updateOffer,
+    updateSaid: keepUpdate ? this.updateSaid : updateSaid,
+  );
 
   String get countsLine =>
       '${plural(devices, 'device')} · ${plural(entries, 'entry')} · '
@@ -143,6 +172,8 @@ class ConsoleView extends StatefulWidget {
     this.onName,
     this.onDir,
     this.onCheckUpdates,
+    this.onDownloadUpdate,
+    this.onDismissUpdate,
   });
 
   final ConsoleState state;
@@ -170,6 +201,10 @@ class ConsoleView extends StatefulWidget {
   /// Asked for by a press. Absent unless this is an AppImage — see
   /// [ConsoleState.updatable].
   final VoidCallback? onCheckUpdates;
+
+  /// Accept the offered release, and put the offer away again.
+  final ValueChanged<Release>? onDownloadUpdate;
+  final VoidCallback? onDismissUpdate;
   final ValueChanged<String>? onName;
 
   @override
@@ -369,9 +404,38 @@ class _ConsoleViewState extends State<ConsoleView> {
           ],
         ),
         hint:
-            'Asks GitHub for the newest release and replaces this AppImage '
-            'with it. Nothing is checked until you press it.',
+            'Asks GitHub for the newest release. Nothing is checked until you '
+            'press it, and nothing is replaced until you say so.',
       ),
+      // Found, and waiting to be told to go ahead.
+      if (state.updateOffer case final offer?)
+        _row(
+          '${offer.version} is available',
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            children: [
+              PillButton(
+                label: 'Download',
+                icon: Icons.download_outlined,
+                height: 34,
+                onTap: () => widget.onDownloadUpdate?.call(offer),
+              ),
+              PillButton(
+                label: 'Cancel',
+                height: 34,
+                onTap: widget.onDismissUpdate,
+              ),
+            ],
+          ),
+          hint:
+              'Downloading replaces this AppImage where it sits. The copy you '
+              'have open keeps running; the new version starts next time.',
+        ),
+      // What it is doing, or what it did.
+      if (state.updateSaid case final said?)
+        _row(said, const SizedBox.shrink()),
     ]),
   );
 

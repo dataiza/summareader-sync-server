@@ -138,6 +138,7 @@ Future<String?> replaceRunningImage(
   http.Client? client,
   String? imagePath,
   Map<String, String>? environment,
+  void Function(int received, int? total)? onProgress,
 }) async {
   final path = imagePath ?? runningImage(environment);
   if (path == null) {
@@ -154,17 +155,36 @@ Future<String?> replaceRunningImage(
 
   try {
     final web = client ?? http.Client();
-    final answer = await web.get(release.image);
+    // Streamed rather than fetched whole, for two reasons: fifty megabytes of
+    // image does not need to be in memory at once, and somebody watching a
+    // progress line is the difference between "this is working" and "this has
+    // hung". [onProgress] is called with what has arrived and the total when
+    // the server gave a length, which it usually does.
+    final answer = await web.send(http.Request('GET', release.image));
     if (answer.statusCode != 200) {
       return 'The download answered ${answer.statusCode}. Nothing has been '
           'changed.';
     }
-    if (answer.bodyBytes.isEmpty) {
+
+    final sink = partial.openWrite();
+    var received = 0;
+    try {
+      await for (final chunk in answer.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, answer.contentLength);
+      }
+    } finally {
+      await sink.close();
+    }
+    if (received == 0) {
+      if (partial.existsSync()) partial.deleteSync();
       return 'The download was empty. Nothing has been changed.';
     }
 
-    await partial.writeAsBytes(answer.bodyBytes, flush: true);
     await Process.run('chmod', ['755', partial.path]);
+    // Last, and only now: until this rename the old image is untouched, so
+    // an interrupted download costs a file beside it and nothing else.
     await partial.rename(image.path);
     return null;
   } on FileSystemException catch (error) {
