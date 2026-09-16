@@ -3,6 +3,16 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.6
+
+### An updated image renames itself to the version it holds
+
+A self-update writes the new program into the old path — that is what makes
+the swap atomic — so `SummaReaderSync-0.3.5-x86_64.AppImage` went on saying
+0.3.5 while holding 0.3.6, and the launcher entry named that file. The file is
+renamed afterwards now, and the menu entry follows it. Nothing outside the
+name changes, and an entry naming another copy is left alone.
+
 ## 0.3.5
 
 ### Checking for an update no longer installs one

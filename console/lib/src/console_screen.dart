@@ -358,6 +358,12 @@ class _ConsoleScreenState extends State<ConsoleScreen>
           });
         },
       );
+      // The filename carries the version and the swap wrote the new program
+      // into the old path, so without this last month's number sits in the
+      // name of this month's program — and the menu entry names it.
+      if (refusal == null) {
+        await nameForVersion(runningImage()!, release.version);
+      }
       if (!mounted) return;
       setState(() {
         _state = _state.withUpdate(

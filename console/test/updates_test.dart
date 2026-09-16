@@ -317,6 +317,49 @@ void main() {
       expect(apps.existsSync(), isTrue);
     });
 
+    test('the file is renamed to the version it now holds', () async {
+      // The swap writes the new program into the old path, which is what
+      // makes it atomic — so the name is a version behind until this runs,
+      // and the launcher entry names that file.
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final image = File('${apps.path}/App-0.3.4-x86_64.AppImage')
+        ..writeAsStringSync('new program, old name');
+      await addToMenu(image.path, environment: env());
+
+      final now = await nameForVersion(image.path, '0.3.5', environment: env());
+
+      expect(now, '${apps.path}/App-0.3.5-x86_64.AppImage');
+      expect(File(now).existsSync(), isTrue);
+      expect(image.existsSync(), isFalse);
+      expect(menuTarget(env()), now, reason: 'the entry follows the file');
+    });
+
+    test('and left alone when there is no version in the name', () async {
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final image = File('${apps.path}/App-x86_64.AppImage')
+        ..writeAsStringSync('x');
+
+      expect(
+        await nameForVersion(image.path, '0.3.5', environment: env()),
+        image.path,
+      );
+      expect(image.existsSync(), isTrue);
+    });
+
+    test('and an entry naming another copy is not hijacked', () async {
+      final apps = Directory('${home.path}/Applications')..createSync();
+      final theirs = File('${apps.path}/App-0.3.0-x86_64.AppImage')
+        ..writeAsStringSync('another copy');
+      await addToMenu(theirs.path, environment: env());
+      final mine = File('${home.path}/Downloads/App-0.3.4-x86_64.AppImage')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('mine');
+
+      await nameForVersion(mine.path, '0.3.5', environment: env());
+
+      expect(menuTarget(env()), theirs.path);
+    });
+
     test('a stale entry is noticed, and a matching one is not', () {
       final apps = Directory('${home.path}/Applications')..createSync();
       File('${apps.path}/X.AppImage').writeAsStringSync('x');

@@ -141,6 +141,57 @@ bool supersedes(
     named.startsWith('${applicationsDir(environment)}/') &&
     File(named).existsSync();
 
+/// Renames the image to carry the version it now holds, and re-points the
+/// menu entry at it.
+///
+/// An AppImage's filename carries its version — `SummaReader-free-0.22.1
+/// -x86_64.AppImage` — and a self-update writes the new program into the old
+/// path, because that is what makes the swap atomic. Left alone, last month's
+/// number sits in the filename of this month's program, the launcher entry
+/// names it, and the one question a file in a downloads folder has to answer
+/// — which version is this — is answered wrongly.
+///
+/// So this renames the file afterwards and rewrites the entry when the entry
+/// was naming the old path. Everything here is best-effort: the update has
+/// already succeeded by the time it runs, and a program that cannot be renamed
+/// is still the new program.
+///
+/// Returns the path the image now has, which is the old one when nothing
+/// needed renaming or the rename failed.
+Future<String> nameForVersion(
+  String image,
+  String version, {
+  Map<String, String>? environment,
+}) async {
+  final slash = image.lastIndexOf('/');
+  final directory = slash < 0 ? '' : image.substring(0, slash + 1);
+  final name = image.substring(slash + 1);
+
+  // Whatever looks like a version in the name, and only if there is exactly
+  // one: a name with two numbers in it is one this does not understand, and
+  // guessing which to rewrite is worse than leaving it alone.
+  final numbers = RegExp(r'\d+\.\d+(?:\.\d+)?').allMatches(name).toList();
+  if (numbers.length != 1) return image;
+  if (numbers.first.group(0) == version) return image;
+
+  final renamed =
+      '$directory${name.replaceRange(numbers.first.start, numbers.first.end, version)}';
+  if (renamed == image) return image;
+
+  try {
+    await File(image).rename(renamed);
+  } on FileSystemException {
+    return image;
+  }
+
+  // Only when it was pointing here. An entry naming somewhere else belongs to
+  // another copy, and repointing it would hijack that.
+  if (menuTarget(environment) == image) {
+    await addToMenu(renamed, environment: environment);
+  }
+  return renamed;
+}
+
 /// Writes the entry and the icons.
 ///
 /// [image] is the AppImage's own path. Pass it through [keepImage] first: the
