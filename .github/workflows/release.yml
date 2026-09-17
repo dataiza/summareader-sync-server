@@ -178,7 +178,12 @@ jobs:
         with:
           flutter-version: '3.47.0'
           channel: stable
-          cache: true
+          # Off, and measured in the app's repository: the Flutter cache is
+          # 1.7 GB on Linux and 2.2 GB on macOS — the whole SDK plus its
+          # precached artifacts — against about 700 MB from Google's CDN, and
+          # the release's Linux job went from 4m27s with the cache to 2m51s
+          # without it.
+          cache: false
 
       - name: System headers
         # Only on a hosted runner: a self-hosted box has these already, and
