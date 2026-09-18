@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:summareader_ui/summareader_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -25,7 +26,16 @@ class ConsoleScreen extends StatefulWidget {
     required this.configDir,
     required this.addr,
     this.chosen = true,
+    this.client,
+    this.environment,
   });
+
+  /// The two things an update needs from outside this process: somewhere to
+  /// fetch the image from, and an APPIMAGE to replace. Null everywhere but a
+  /// test, which has neither a network nor a running AppImage and so supplies
+  /// a stand-in for both.
+  final http.Client? client;
+  final Map<String, String>? environment;
 
   /// Where the database is when the window opens. Mutable afterwards — see
   /// `_dir` in the state, which is what everything reads once somebody has
@@ -195,6 +205,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         updatable: _updatable,
         updateOffer: _state.updateOffer,
         updateSaid: _state.updateSaid,
+        // Carried like the other two, and for the reason above: left out, the
+        // line saying the update is in place survived the tick and the button
+        // that acts on it did not.
+        updateInstalled: _state.updateInstalled,
       );
     });
   }
@@ -345,6 +359,8 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     try {
       final refusal = await replaceRunningImage(
         release,
+        client: widget.client,
+        environment: widget.environment,
         onProgress: (received, total) {
           if (!mounted || total == null || total <= 0) return;
           final percent = (received * 100 ~/ total).clamp(0, 100);
@@ -362,7 +378,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       // into the old path, so without this last month's number sits in the
       // name of this month's program — and the menu entry names it.
       final now = refusal == null
-          ? await nameForVersion(runningImage()!, release.version)
+          ? await nameForVersion(
+              runningImage(widget.environment)!,
+              release.version,
+              environment: widget.environment,
+            )
           : null;
       if (!mounted) return;
       setState(() {
@@ -381,7 +401,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// Whether this is an AppImage: the one form that is a single file this
   /// program owns, so replacing it and registering it are things it can
   /// honestly offer to do. A tarball or a `flutter run` shows neither.
-  bool get _updatable => runningImage() != null;
+  bool get _updatable => runningImage(widget.environment) != null;
 
   /// Puts the console in the applications menu, or takes it out.
   ///

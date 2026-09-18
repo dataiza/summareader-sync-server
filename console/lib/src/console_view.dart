@@ -157,6 +157,10 @@ class ConsoleState {
     // second.
     updateOffer: keepUpdate ? this.updateOffer : updateOffer,
     updateSaid: keepUpdate ? this.updateSaid : updateSaid,
+    // The third of the set, and left out of it until now: a download wrote
+    // where the new image is and this dropped it on the way through, so the
+    // line about restarting arrived without the button that does it.
+    updateInstalled: keepUpdate ? this.updateInstalled : updateInstalled,
   );
 
   String get countsLine =>

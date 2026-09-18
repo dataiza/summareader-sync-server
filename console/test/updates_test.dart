@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:summareader_sync_console/src/console_screen.dart';
+import 'package:summareader_sync_console/src/console_view.dart';
 import 'package:summareader_sync_console/src/desktop_entry.dart';
 import 'package:summareader_sync_console/src/updates.dart';
 import 'package:summareader_sync_console/src/version.dart';
@@ -420,4 +423,79 @@ void main() {
       }
     });
   });
+  group('after a download has finished', () {
+    /// Runs a download through the whole screen, and answers with the state
+    /// the view is drawing afterwards.
+    ///
+    /// Pumped whole rather than as a view handed a state, because both of the
+    /// things that went wrong here are in the screen: one console never wrote
+    /// the field at all, and this one wrote it and rebuilt it away two seconds
+    /// later.
+    Future<ConsoleState> downloaded(WidgetTester tester) async {
+      final dir = Directory.systemTemp.createTempSync('console-update');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final image = File('${dir.path}/SummaReader-sync-0.3.8-x86_64.AppImage')
+        ..writeAsStringSync('the old one');
+      final renamed = File(
+        '${dir.path}/SummaReader-sync-9.9.9-x86_64.AppImage',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ConsoleScreen(
+            dir: dir.path,
+            configDir: dir.path,
+            addr: '127.0.0.1:8099',
+            environment: {
+              'APPIMAGE': image.path,
+              'HOME': dir.path,
+              'XDG_DATA_HOME': '',
+            },
+            client: MockClient((_) async => http.Response('the new one', 200)),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Outside the fake clock: the swap writes a file and renames it, and
+      // real disk work does not finish on a pump. The rename is the last step
+      // before the state is set, so waiting for it is waiting for the update.
+      await tester.runAsync(() async {
+        view(tester).onDownloadUpdate!((
+          version: '9.9.9',
+          image: Uri.parse('https://example.invalid/x.AppImage'),
+        ));
+        while (!renamed.existsSync()) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pump();
+      return view(tester).state;
+    }
+
+    testWidgets('there is somewhere to restart into', (tester) async {
+      final state = await downloaded(tester);
+      expect(state.updateSaid, contains('9.9.9'));
+      // Without this the window says an update is in place and offers no way
+      // to use it, which is what the other console did.
+      expect(state.updateInstalled, isNotNull);
+      expect(state.updateInstalled, endsWith('-9.9.9-x86_64.AppImage'));
+    });
+
+    testWidgets('and the poll two seconds later keeps it', (tester) async {
+      await downloaded(tester);
+      // The bug this exists for: the field was set correctly and then left out
+      // of the list the poll rebuilds the state from, so the sentence survived
+      // and the button under it did not.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      expect(view(tester).state.updateSaid, contains('9.9.9'));
+      expect(view(tester).state.updateInstalled, isNotNull);
+    });
+  });
 }
+
+/// What the window is drawing right now.
+ConsoleView view(WidgetTester tester) =>
+    tester.widget<ConsoleView>(find.byType(ConsoleView));
