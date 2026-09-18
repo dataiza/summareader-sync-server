@@ -3,6 +3,51 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.4.0
+
+### The way out is where the way in was
+
+Opening Configuration put **Close** on the left of the title while the button
+that opened the page sat on the right, so leaving was not where arriving had
+been. It is the same slot now — and there is only one slot, because a header
+with two places to put one control is a header where the control ends up in
+both.
+
+### The device list speaks from the server's side
+
+Each row read *"N entries sent"*, which is true from the device's point of view
+in a window that belongs to the server. It says **received** now. The number is
+unchanged and means what it always did: the entries carrying that device's id,
+which is what it appended. A device that has never appended anything shows
+zero, and a fresh time beside a count that does not move is the honest picture
+of a device that syncs and has nothing to say.
+
+### The Restart button has somewhere to go
+
+After downloading a new version the window said it was in place and offered no
+way to use it. Two things were dropping the path it had written: the state's own
+copy carried the offer and the sentence and silently left the third field out,
+and the two-second poll would have wiped it again a moment later. Each was
+confirmed by reverting it alone.
+
+### Changing the data directory asks first
+
+It stopped the server, opened whatever was at the new path and restarted,
+without a word — and it moves nothing. The library it was serving stays where
+it is, and **devices live in that database**, so pointed at an empty directory
+the server has no entries and no paired devices, and every device paired with
+it becomes a stranger. It now names both paths, says what will happen, and says
+that typing the old path back brings all of it back. The first-run question is
+exempt: that question is already the question.
+
+### A typed value is kept when you leave the box
+
+Only Enter used to commit. Now leaving the field, changing the page or closing
+the window keeps it too — but only when the value parses and differs from the
+one stored, and a refused value puts the box back to what is really in effect.
+Clearing the port box and clicking away no longer sets 8099, which is what an
+empty string used to mean.
+
 ## 0.3.9
 
 ### A broken macOS or Windows build is found on the pull request
