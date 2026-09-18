@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
+import 'package:summareader_sync_console/src/console_screen.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
 import 'package:summareader_sync_console/src/updates.dart';
 import 'package:summareader_sync_console/src/first_run.dart';
@@ -16,8 +17,10 @@ import 'package:summareader_sync_console/src/service.dart';
 
 void main() {
   _theTwoPages();
+  _leavingAField();
   _whereThingsAre();
   _theFirstRun();
+  _changingTheDirectory();
   _deviceControls();
   _serverIssuedCode();
 
@@ -489,17 +492,25 @@ void _theTwoPages() {
       await pumpConsole(tester);
 
       final openedAt = tester.getCenter(find.text('Configuration'));
-      final titleBefore = tester.getCenter(find.text('SummaReader Sync Server'));
-      expect(openedAt.dx, greaterThan(titleBefore.dx),
-          reason: 'the button that opens it is after the title');
+      final titleBefore = tester.getCenter(
+        find.text('SummaReader Sync Server'),
+      );
+      expect(
+        openedAt.dx,
+        greaterThan(titleBefore.dx),
+        reason: 'the button that opens it is after the title',
+      );
 
       await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
 
       final closesAt = tester.getCenter(find.text('Close'));
       final title = tester.getCenter(find.text('Configuration').first);
-      expect(closesAt.dx, greaterThan(title.dx),
-          reason: 'and so is the one that closes it');
+      expect(
+        closesAt.dx,
+        greaterThan(title.dx),
+        reason: 'and so is the one that closes it',
+      );
     });
 
     testWidgets('a found release is offered, not installed', (tester) async {
@@ -740,6 +751,218 @@ void _theFirstRun() {
     test('an empty directory is not a library', () {
       expect(holdsALibrary(dir.path), isFalse);
       expect(emptyLibrary(dir.path), completion(isFalse));
+    });
+  });
+}
+
+/// Repointing the server at another directory, which is not the preference it
+/// looks like: the account and every paired device live in the one being left
+/// behind, and nothing moves with it.
+void _changingTheDirectory() {
+  group('changing the data directory', () {
+    late Directory home;
+    late Directory elsewhere;
+
+    /// The window, pointed at a temporary library, with the directory it would
+    /// be moved to already on disk.
+    ///
+    /// Pumped whole rather than as a view handed a state: the question is
+    /// whether the *screen* asks before it writes anything, and a view cannot
+    /// answer that.
+    Future<void> pumpScreen(WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ConsoleScreen(
+            dir: home.path,
+            configDir: home.path,
+            addr: '127.0.0.1:8099',
+            environment: {'HOME': home.path, 'XDG_DATA_HOME': ''},
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    setUp(() {
+      home = Directory.systemTemp.createTempSync('console-relocate');
+      elsewhere = Directory.systemTemp.createTempSync('console-relocate-to');
+    });
+    tearDown(() {
+      home.deleteSync(recursive: true);
+      elsewhere.deleteSync(recursive: true);
+    });
+
+    testWidgets('it asks first, and names both directories', (tester) async {
+      await pumpScreen(tester);
+
+      tester.widget<ConsoleView>(find.byType(ConsoleView)).onDir!(
+        elsewhere.path,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Change the data directory?'), findsOneWidget);
+      // Behind the detail section, which is where the two paths live.
+      await tester.tap(find.text('What this does'));
+      await tester.pumpAndSettle();
+      expect(find.text(home.path), findsOneWidget, reason: 'the one in use');
+      expect(find.text(elsewhere.path), findsOneWidget, reason: 'the new one');
+    });
+
+    testWidgets('leaving it writes nothing', (tester) async {
+      await pumpScreen(tester);
+
+      tester.widget<ConsoleView>(find.byType(ConsoleView)).onDir!(
+        elsewhere.path,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Leave it'));
+      await tester.pumpAndSettle();
+
+      expect(
+        File(configPath(home.path)).existsSync(),
+        isFalse,
+        reason: 'a refused change is not half-made',
+      );
+      expect(
+        tester.widget<ConsoleView>(find.byType(ConsoleView)).state.dir,
+        home.path,
+        reason: 'and the server is still pointed where it was',
+      );
+    });
+
+    testWidgets('changing it goes through', (tester) async {
+      await pumpScreen(tester);
+
+      tester.widget<ConsoleView>(find.byType(ConsoleView)).onDir!(
+        elsewhere.path,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change it'));
+      await tester.pumpAndSettle();
+      expect(readConfig(home.path)['dir'], elsewhere.path);
+
+      // Outside the fake clock: what redraws the window is the poll that runs
+      // after the move, and it asks the real process table and the real
+      // network whether anything is up. None of that finishes on a pump.
+      for (var i = 0; i < 100; i++) {
+        if (tester.widget<ConsoleView>(find.byType(ConsoleView)).state.dir ==
+            elsewhere.path) {
+          break;
+        }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+      expect(
+        tester.widget<ConsoleView>(find.byType(ConsoleView)).state.dir,
+        elsewhere.path,
+        reason: 'the window is drawing the directory it now serves',
+      );
+    });
+
+    testWidgets('the directory it already has asks nothing', (tester) async {
+      // A field that commits when focus leaves hands this the same path it was
+      // given, and a dialog for that would be its own bug.
+      await pumpScreen(tester);
+
+      tester.widget<ConsoleView>(find.byType(ConsoleView)).onDir!(home.path);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Change the data directory?'), findsNothing);
+    });
+  });
+}
+
+/// Nothing typed into a box is lost by leaving it.
+///
+/// Every field here was Enter-only, which is a rule a window teaches nobody:
+/// the value is simply gone, with no sign that anything was refused.
+void _leavingAField() {
+  const state = ConsoleState(
+    dir: '/data',
+    addr: '127.0.0.1:8099',
+    serverBinary: '/bin/summareader-sync',
+  );
+
+  Future<void> openConfiguration(
+    WidgetTester tester, {
+    ValueChanged<String>? onDir,
+    ValueChanged<String>? onPort,
+  }) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ConsoleView(state: state, onDir: onDir, onPort: onPort),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Configuration'));
+    await tester.pumpAndSettle();
+  }
+
+  /// What a click somewhere else does, without a somewhere else to click.
+  Future<void> leave(WidgetTester tester) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+  }
+
+  group('leaving a field', () {
+    testWidgets('hands over what was typed', (tester) async {
+      String? chosen;
+      await openConfiguration(tester, onDir: (next) => chosen = next);
+
+      await tester.enterText(
+        find.widgetWithText(ArField, '/data'),
+        '/mnt/big/sync',
+      );
+      await leave(tester);
+
+      expect(chosen, '/mnt/big/sync');
+    });
+
+    testWidgets('and so does closing the page', (tester) async {
+      // The awkward one: the field is gone by the time anything notices, and
+      // no focus event arrives to say so.
+      String? chosen;
+      await openConfiguration(tester, onDir: (next) => chosen = next);
+
+      await tester.enterText(
+        find.widgetWithText(ArField, '/data'),
+        '/mnt/big/sync',
+      );
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      expect(chosen, '/mnt/big/sync');
+    });
+
+    testWidgets('but not what nobody changed', (tester) async {
+      String? chosen;
+      await openConfiguration(tester, onDir: (next) => chosen = next);
+
+      await tester.enterText(find.widgetWithText(ArField, '/data'), '/data');
+      await leave(tester);
+
+      expect(chosen, isNull);
+    });
+
+    testWidgets('and an emptied port is not 8099', (tester) async {
+      // The reason the guard is in the field and not in the handler: the
+      // handler reads an empty box as the default port, which is the right
+      // answer to somebody who pressed Enter on one and a silent rebind for
+      // somebody who cleared the box and clicked away.
+      String? chosen;
+      await openConfiguration(tester, onPort: (next) => chosen = next);
+
+      for (final nonsense in ['', 'soon', '70000']) {
+        await tester.enterText(find.widgetWithText(ArField, '8099'), nonsense);
+        await leave(tester);
+        expect(chosen, isNull, reason: nonsense);
+        // And the box says what is stored, because a box saying something
+        // else is a window saying something untrue.
+        expect(find.text('8099'), findsWidgets, reason: nonsense);
+      }
     });
   });
 }

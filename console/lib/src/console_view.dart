@@ -1,3 +1,6 @@
+// AppExitResponse lives here rather than in the widgets layer.
+import 'dart:ui' show AppExitResponse;
+
 import 'package:flutter/material.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 
@@ -843,6 +846,92 @@ class _ConsoleViewState extends State<ConsoleView> {
   );
 }
 
+/// Takes what was typed when the field is left, not only when Enter is
+/// pressed.
+///
+/// Typing into a box and clicking elsewhere used to throw the value away,
+/// which is the kind of thing nobody reports and everybody works around. So
+/// the value is taken when focus goes, when the page changes — the widget is
+/// gone by then and no focus event arrives, hence [dispose] — and when the
+/// window closes.
+///
+/// The guard sits here rather than in the handlers because the handlers were
+/// written for Enter, where a deliberate value deserves a literal answer: the
+/// port handler reads an empty box as 8099, which is a sensible default for
+/// somebody who asked and a silent rebind for somebody who clicked away
+/// mid-word. Nothing is sent unless it parses and differs from what is
+/// stored, and a value that does not parse puts the box back to what is
+/// stored, so what is on screen stays true.
+mixin _CommitsOnLeaving<T extends StatefulWidget> on State<T> {
+  /// What the surrounding state holds — and what a refused value reverts to.
+  String get stored;
+
+  ValueChanged<String>? get onSubmitted;
+
+  /// Whether the trimmed text is worth handing over. Anything is, by default.
+  bool accepts(String typed) => true;
+
+  late final controller = TextEditingController(text: stored);
+
+  /// The field's own node, because losing focus is the event this is about
+  /// and [ArField] already takes one.
+  late final focus = FocusNode();
+
+  AppLifecycleListener? _closing;
+
+  /// What was last handed over, so that leaving a field immediately after
+  /// pressing Enter in it does not hand the same thing over twice.
+  String? _sent;
+
+  @override
+  void initState() {
+    super.initState();
+    focus.addListener(() {
+      if (!focus.hasFocus) commit();
+    });
+    _closing = AppLifecycleListener(
+      onExitRequested: () async {
+        commit();
+        return AppExitResponse.exit;
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _closing?.dispose();
+    commit();
+    focus.dispose();
+    controller.dispose();
+    super.dispose();
+  }
+
+  void commit() {
+    final handler = onSubmitted;
+    final typed = controller.text.trim();
+    if (handler == null || typed == _sent) return;
+    if (!accepts(typed)) {
+      controller.text = stored;
+      return;
+    }
+    if (typed == stored.trim()) return;
+    _sent = typed;
+    handler(typed);
+  }
+
+  /// What [ArField] is handed. Enter still goes straight to the handler,
+  /// complaint and all — only when the value is captured changes here, not
+  /// what capturing it does — and is noted so the blur that follows is quiet.
+  ValueChanged<String>? get submit {
+    final handler = onSubmitted;
+    if (handler == null) return null;
+    return (typed) {
+      _sent = typed.trim();
+      handler(typed);
+    };
+  }
+}
+
 /// The port, in a field that keeps its own text.
 ///
 /// Its own widget because a controller rebuilt on every poll loses the caret
@@ -860,22 +949,24 @@ class _NameField extends StatefulWidget {
   State<_NameField> createState() => _NameFieldState();
 }
 
-class _NameFieldState extends State<_NameField> {
-  late final _controller = TextEditingController(text: widget.name);
+class _NameFieldState extends State<_NameField> with _CommitsOnLeaving {
+  @override
+  String get stored => widget.name;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  ValueChanged<String>? get onSubmitted => widget.onSubmitted;
+
+  // No check. A name can be left empty — the hint says what it falls back to
+  // then — so there is nothing here that a typed name could fail.
 
   @override
   Widget build(BuildContext context) => ArField(
-    controller: _controller,
+    controller: controller,
+    focusNode: focus,
     // The default it falls back to, shown rather than described.
     hint: 'Acme',
     background: Ar.neutral100,
-    onSubmitted: widget.onSubmitted,
+    onSubmitted: submit,
   );
 }
 
@@ -897,25 +988,29 @@ class _DirField extends StatefulWidget {
   State<_DirField> createState() => _DirFieldState();
 }
 
-class _DirFieldState extends State<_DirField> {
-  late final _controller = TextEditingController(text: widget.dir);
+class _DirFieldState extends State<_DirField> with _CommitsOnLeaving {
+  @override
+  String get stored => widget.dir;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  ValueChanged<String>? get onSubmitted => widget.onSubmitted;
+
+  /// The server always runs out of some directory, so an empty box is a box
+  /// somebody is halfway through emptying rather than an answer.
+  @override
+  bool accepts(String typed) => typed.isNotEmpty;
 
   @override
   Widget build(BuildContext context) => ArField(
-    controller: _controller,
+    controller: controller,
+    focusNode: focus,
     // No hint. [_NameField] shows the default it falls back to, which is
     // useful because a name can be left empty; a directory cannot, so the
     // field always holds one and a placeholder repeating it would be the same
     // string twice. The row's own hint says what changing it costs.
     fontSize: 12.5,
     background: Ar.neutral100,
-    onSubmitted: widget.onSubmitted,
+    onSubmitted: submit,
   );
 }
 
@@ -929,19 +1024,27 @@ class _PortField extends StatefulWidget {
   State<_PortField> createState() => _PortFieldState();
 }
 
-class _PortFieldState extends State<_PortField> {
-  late final _controller = TextEditingController(text: widget.port);
+class _PortFieldState extends State<_PortField> with _CommitsOnLeaving {
+  @override
+  String get stored => widget.port;
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+  ValueChanged<String>? get onSubmitted => widget.onSubmitted;
+
+  /// The bounds are repeated from the handler on purpose: it answers an empty
+  /// box with 8099, which is only the right answer to somebody who pressed
+  /// Enter on an empty box.
+  @override
+  bool accepts(String typed) {
+    final port = int.tryParse(typed);
+    return port != null && port >= 1 && port <= 65535;
   }
 
   @override
   Widget build(BuildContext context) => ArField(
-    controller: _controller,
+    controller: controller,
+    focusNode: focus,
     background: Ar.neutral100,
-    onSubmitted: widget.onSubmitted,
+    onSubmitted: submit,
   );
 }

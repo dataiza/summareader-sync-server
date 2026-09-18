@@ -343,3 +343,114 @@ Future<bool> askAboutARepoint(
 
   return wanted;
 }
+
+/// Asks before the data directory is repointed at somewhere else.
+///
+/// This restarts the server against a different database, and the word
+/// "directory" makes it sound like a preference. It is not one: the account,
+/// every paired device and everything they have sent live in the directory
+/// being left behind, so a server pointed at an empty one comes up knowing
+/// nobody.
+///
+/// Nothing is moved and nothing is deleted, which is the reassurance that
+/// makes the rest readable — setting the old path back here puts it all
+/// exactly as it was. Said in the dialog, because somebody who has already
+/// pressed the button needs it more than somebody who has not.
+///
+/// Both paths are behind the detail section rather than in the lead, on the
+/// same grounds as `askAboutARepoint`: the sentence that decides the answer
+/// should not be read past two absolute paths to get to.
+///
+/// Returns true to go ahead.
+Future<bool> askAboutChangingTheDirectory(
+  BuildContext context,
+  String from,
+  String to,
+) async {
+  var wanted = false;
+  var showingDetail = false;
+
+  await showConsoleDialog(
+    context,
+    'Change the data directory?',
+    StatefulBuilder(
+      builder: (dialogContext, setInner) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'The server restarts and opens whatever is in the new directory. '
+            'Nothing is moved: the library it is serving now stays where it '
+            'is, and stops being served.',
+            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          ),
+          const SizedBox(height: 14),
+          Hoverable(
+            onTap: () => setInner(() => showingDetail = !showingDetail),
+            builder: (context, hovered) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  showingDetail ? Icons.expand_more : Icons.chevron_right,
+                  size: 18,
+                  color: Ar.dim(hovered ? 0.85 : 0.6),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'What this does',
+                  style: Ar.bodyStyle(13, color: Ar.dim(hovered ? 0.85 : 0.6)),
+                ),
+              ],
+            ),
+          ),
+          if (showingDetail) ...[
+            const SizedBox(height: 12),
+            Text(
+              'It is serving this one:',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(from, style: Ar.bodyStyle(12.5, color: Ar.dim(0.6))),
+            const SizedBox(height: 12),
+            Text(
+              'and it would open this one:',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(to, style: Ar.bodyStyle(12.5, color: Ar.dim(0.6))),
+            const SizedBox(height: 12),
+            Text(
+              'If there is no library in the new directory the server starts '
+              'with an empty one — no entries, and no paired devices, so every '
+              'device you have paired is a stranger to it until it is pointed '
+              'back. Nothing in the old directory is touched or deleted: '
+              'typing that path in here again brings all of it back.',
+              style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
+            ),
+          ],
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(
+                label: 'Leave it',
+                onTap: () => Navigator.of(dialogContext).pop(),
+              ),
+              const SizedBox(width: 9),
+              PrimaryButton(
+                label: 'Change it',
+                onTap: () {
+                  wanted = true;
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+    done: false,
+  );
+
+  return wanted;
+}

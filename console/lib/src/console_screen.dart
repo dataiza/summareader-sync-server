@@ -506,12 +506,27 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       await _refresh();
       return;
     }
-    await _relocate(wanted);
+    // Not asked about: the first-run question *is* the question, and a
+    // confirmation behind it would be asking the same thing twice with the
+    // second one sounding like a warning.
+    await _relocate(wanted, confirm: false);
   }
 
-  Future<void> _relocate(String next) async {
+  /// Points the server at another directory, having asked first.
+  ///
+  /// The question belongs here rather than to the field, because this is the
+  /// one place an attempt to change the directory actually arrives — typed and
+  /// submitted, or chosen however a caller chose it. A field that commits when
+  /// focus leaves would otherwise raise it for somebody who clicked elsewhere,
+  /// and the unchanged-path return above means it is never raised for a path
+  /// that is already the one in use.
+  Future<void> _relocate(String next, {bool confirm = true}) async {
     final wanted = next.trim();
     if (wanted.isEmpty || wanted == _dir) return;
+    if (confirm) {
+      final agreed = await askAboutChangingTheDirectory(context, _dir, wanted);
+      if (!agreed || !mounted) return;
+    }
     try {
       final wasRunning = await _server.running;
       await _server.stop();
