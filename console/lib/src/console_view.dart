@@ -657,9 +657,22 @@ class _ConsoleViewState extends State<ConsoleView> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(name, style: Ar.bodyStyle(14, weight: FontWeight.w600)),
+              // Received, from the server's side, because this is the
+              // server's window. The count is what this device *appended* —
+              // `overview.go` counts the entries carrying its id — so the
+              // direction is device to server either way; only the side the
+              // sentence is spoken from has changed. Do not "correct" this to
+              // the device having received them, which is the one reading it
+              // does not mean.
+              //
+              // The time beside it is when the device last spoke, not when it
+              // last changed anything: a device that syncs and appends nothing
+              // shows a fresh time against a count that does not move, which
+              // is how "nothing to say" is told apart from "not getting
+              // through".
               Text(
                 '${ago(device.lastSeen)} · '
-                '${plural(device.entries, 'entry')} sent',
+                '${plural(device.entries, 'entry')} received',
                 style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
               ),
             ],
