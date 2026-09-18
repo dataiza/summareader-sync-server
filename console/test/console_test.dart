@@ -481,6 +481,27 @@ void _theTwoPages() {
       expect(find.text('Devices'), findsOneWidget);
     });
 
+    testWidgets('the way out is where the way in was', (tester) async {
+      // Close used to sit to the left of the title while the Configuration
+      // button that opened it sat to the right, so leaving was not where
+      // arriving had been. Position, not presence: tapping by label passes
+      // either way, which is why nothing caught this.
+      await pumpConsole(tester);
+
+      final openedAt = tester.getCenter(find.text('Configuration'));
+      final titleBefore = tester.getCenter(find.text('SummaReader Sync Server'));
+      expect(openedAt.dx, greaterThan(titleBefore.dx),
+          reason: 'the button that opens it is after the title');
+
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      final closesAt = tester.getCenter(find.text('Close'));
+      final title = tester.getCenter(find.text('Configuration').first);
+      expect(closesAt.dx, greaterThan(title.dx),
+          reason: 'and so is the one that closes it');
+    });
+
     testWidgets('a found release is offered, not installed', (tester) async {
       // Replacing the program somebody is running is the one control on this
       // page that changes this program, and it used to happen because they

@@ -278,7 +278,12 @@ class _ConsoleViewState extends State<ConsoleView> {
       'Configuration',
       'Where the library is kept, what the server is called, where it listens, '
           'and whether it comes back after a reboot.',
-      leading: PillButton(
+      // Where Configuration was, because that is the button this one
+      // replaces. It sat to the left of the title while the button that
+      // opened the page sat to the right, so leaving was not where arriving
+      // had been — and there is now only one slot to put it in, which is what
+      // stops the two pages drifting apart again.
+      trailing: PillButton(
         label: 'Close',
         icon: Icons.arrow_back,
         height: 36,
@@ -328,20 +333,17 @@ class _ConsoleViewState extends State<ConsoleView> {
 
   /// The title, the line under it, and whatever the page hangs either side of
   /// them: the menu on the window, Back on Settings.
-  Widget _topBar(
-    String title,
-    String blurb, {
-    Widget? leading,
-    Widget? trailing,
-  }) => Padding(
+  /// The title, the sentence under it, and the one control the page carries.
+  ///
+  /// One slot rather than two. There was a `leading` as well, used by exactly
+  /// one page to put its Close on the far side from the Configuration button
+  /// that opened it; a header with two places to put one control is a header
+  /// where the control ends up in both.
+  Widget _topBar(String title, String blurb, {Widget? trailing}) => Padding(
     padding: const EdgeInsets.only(bottom: 26),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (leading != null) ...[
-          Padding(padding: const EdgeInsets.only(top: 6), child: leading),
-          const SizedBox(width: 14),
-        ],
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
