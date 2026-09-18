@@ -3,6 +3,22 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.9
+
+### A broken macOS or Windows build is found on the pull request
+
+The release cross-compiles five targets from the Linux runner, so a break on
+either of the two nobody here can run was found at tag time — when the fix is
+most expensive and the release is already waiting on it. CI now builds for
+`darwin/arm64` and `windows/amd64` alongside the tests.
+
+It is a compile check and nothing more, which is all the code allows: there is
+no cgo and there are no build tags, so the compiler sees everything, and the
+one platform-specific branch — the data directory in `main.go` — is already
+covered by tests that take the platform as a parameter. Deliberately not a
+`windows-latest` job: with no Windows machine to run the binary on, that would
+cost minutes to re-prove exactly what this proves for nothing.
+
 ## 0.3.8
 
 ### The install question asks about installing
