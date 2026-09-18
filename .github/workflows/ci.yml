@@ -28,6 +28,17 @@ jobs:
       - name: Test
         run: go test -race -count=3 ./...
 
+      # The release cross-compiles five targets from this same Linux runner,
+      # so a break on macOS or Windows was found at tag time rather than on
+      # the pull request that caused it. No cgo and no build tags means the
+      # compiler is the whole check, and it costs seconds on a runner that is
+      # already warm — the platform-specific code is one switch on
+      # `runtime.GOOS` in main.go choosing the data directory.
+      - name: It still builds for the other two
+        run: |
+          GOOS=darwin GOARCH=arm64 go build ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+
   console:
     name: Console
     runs-on: ubuntu-latest
