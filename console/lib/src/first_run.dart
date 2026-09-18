@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 
 import 'pairing_dialogs.dart';
+import 'version.dart';
 
 /// The question asked once, before the window is any use.
 ///
@@ -232,6 +233,10 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
 /// Asked rather than done, on the same grounds as adding it in the first
 /// place: this rewrites a file in somebody's home, and the launch it happens
 /// on has nothing to do with the menu as far as they are concerned.
+///
+/// The question is the one being answered, which is whether to install this
+/// release — the two paths and the deletion are how that is carried out, and
+/// leading with them buried the only sentence anybody needed to read.
 Future<bool> askAboutARepoint(
   BuildContext context,
   String named,
@@ -239,48 +244,79 @@ Future<bool> askAboutARepoint(
   String? replacing,
 }) async {
   var wanted = false;
+  var showingDetail = false;
 
   await showConsoleDialog(
     context,
-    'This is not the copy in your applications menu',
-    Builder(
-      builder: (dialogContext) => Column(
+    'Install version $consoleVersion?',
+    StatefulBuilder(
+      builder: (dialogContext, setInner) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Your applications menu starts this one:',
+            'You are running a copy that your applications menu does not know '
+            'about. Installing it makes this the copy the menu starts.',
             style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
           ),
-          const SizedBox(height: 6),
-          SelectableText(named, style: Ar.bodyStyle(12.5, color: Ar.dim(0.6))),
-          const SizedBox(height: 12),
-          Text(
-            'and you are running this one:',
-            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          const SizedBox(height: 14),
+          // Closed by default: what moves where is the answer to a question
+          // that only some people ask, and it is a wall of text in front of
+          // everybody else.
+          Hoverable(
+            onTap: () => setInner(() => showingDetail = !showingDetail),
+            builder: (context, hovered) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  showingDetail ? Icons.expand_more : Icons.chevron_right,
+                  size: 18,
+                  color: Ar.dim(hovered ? 0.85 : 0.6),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'What this does',
+                  style: Ar.bodyStyle(13, color: Ar.dim(hovered ? 0.85 : 0.6)),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          SelectableText(
-            running,
-            style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
-          ),
-          const SizedBox(height: 12),
-          // What the button does, rather than what is wrong. Somebody who has
-          // just downloaded a new release and run it wants to be told they are
-          // installing it, and where it is going.
-          Text(
-            replacing != null
-                ? 'Moving this one to ~/Applications and starting it from the '
-                      'menu from now on makes it the copy you have installed. '
-                      '$replacing is deleted — it is the same program, one '
-                      'download behind, and two copies each update themselves '
-                      'separately.'
-                : 'Moving this one to ~/Applications and starting it from the '
-                      'menu from now on makes it the copy you have installed. '
-                      'If the entry keeps naming a file that is gone, the icon '
-                      'in your launcher starts nothing at all.',
-            style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
-          ),
+          if (showingDetail) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Your applications menu starts this one:',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(
+              named,
+              style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'and you are running this one:',
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+            ),
+            const SizedBox(height: 6),
+            SelectableText(
+              running,
+              style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              replacing != null
+                  ? 'Moving this one to ~/Applications and starting it from the '
+                        'menu from now on makes it the copy you have installed. '
+                        '$replacing is deleted — it is the same program, one '
+                        'download behind, and two copies each update themselves '
+                        'separately.'
+                  : 'Moving this one to ~/Applications and starting it from the '
+                        'menu from now on makes it the copy you have installed. '
+                        'If the entry keeps naming a file that is gone, the icon '
+                        'in your launcher starts nothing at all.',
+              style: Ar.bodyStyle(13, color: Ar.dim(0.7), height: 1.6),
+            ),
+          ],
           const SizedBox(height: 18),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -291,7 +327,7 @@ Future<bool> askAboutARepoint(
               ),
               const SizedBox(width: 9),
               PrimaryButton(
-                label: 'Use this one',
+                label: 'Install',
                 onTap: () {
                   wanted = true;
                   Navigator.of(dialogContext).pop();

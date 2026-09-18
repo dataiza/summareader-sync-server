@@ -1,7 +1,7 @@
 name: summareader_sync_console
 description: The desktop console for the SummaReader sync server.
 publish_to: none
-version: 0.3.7
+version: 0.3.8
 
 environment:
   sdk: ^3.9.0

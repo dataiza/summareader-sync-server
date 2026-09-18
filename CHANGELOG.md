@@ -3,6 +3,16 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.3.8
+
+### The install question asks about installing
+
+The dialog that offers to repoint the menu entry opened with what was wrong
+rather than with what was about to happen, and put two paths, a move and a
+deletion in front of the buttons. It now asks whether to install the version
+in hand, and keeps the rest behind a "What this does" disclosure that starts
+closed.
+
 ## 0.3.7
 
 ### Restart now

@@ -7,4 +7,4 @@
 ///
 /// Kept in step with pubspec.yaml, and through that with the server it supervises:
 /// one release, one number, however many programs it is spread across.
-const consoleVersion = '0.3.7';
+const consoleVersion = '0.3.8';
