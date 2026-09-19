@@ -543,6 +543,8 @@ void _startingWithTheWindow() {
       );
       await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
+      await tester.tap(configPill('When it starts'));
+      await tester.pumpAndSettle();
 
       final switched = find.byWidgetPredicate(
         (widget) =>
@@ -561,6 +563,13 @@ void _startingWithTheWindow() {
     });
   });
 }
+
+/// The Configuration page chooser's pill for [title], as distinct from the
+/// section heading of the same name on the page it opens — which is the whole
+/// point of asserting by page rather than by label.
+Finder configPill(String title) => find.byWidgetPredicate(
+  (widget) => widget is Segment && widget.label == title,
+);
 
 void _theTwoPages() {
   group('the window and what Configuration keeps off it', () {
@@ -602,25 +611,85 @@ void _theTwoPages() {
       await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
 
-      // Nothing was cut on the way across: the name, the address, the port,
-      // the directory and the service are all on the page it opens.
-      for (final moved in [
-        'How it is reached',
-        'Name',
-        'Bind address',
-        'Port',
-        'Data directory',
-        'Start at login',
-        'Keep it running',
-        'Start with this window',
+      // Nothing was cut on the way across, and each control is on the page
+      // whose subject it belongs to. Asserted by page rather than by label:
+      // finding a control anywhere in Configuration passes whichever page it
+      // ended up on, which is how one of them once ended up on two.
+      for (final (page, controls) in [
+        (
+          'How it is reached',
+          ['Name', 'Bind address', 'Port', 'Data directory'],
+        ),
+        (
+          'When it starts',
+          [
+            'Start with this window',
+            'Start when this opens',
+            'Start at login',
+            'Keep it running',
+          ],
+        ),
       ]) {
-        expect(find.text(moved), findsWidgets, reason: moved);
+        await tester.tap(configPill(page));
+        await tester.pumpAndSettle();
+        for (final control in controls) {
+          expect(find.text(control), findsWidgets, reason: '$control on $page');
+        }
+        // And nowhere else: the other page's controls are off screen, not
+        // merely further down the same column.
+        for (final elsewhere in const ['Data directory', 'Keep it running']) {
+          if (!controls.contains(elsewhere)) {
+            expect(find.text(elsewhere), findsNothing, reason: elsewhere);
+          }
+        }
       }
       expect(find.text('Devices'), findsNothing);
 
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('Devices'), findsOneWidget);
+    });
+
+    testWidgets('only the pages that have something on them are offered', (
+      tester,
+    ) async {
+      // How the empty page is avoided: outside an AppImage there is neither
+      // an image to replace nor a menu entry to write, so the pill is not
+      // there rather than opening on a paragraph explaining itself.
+      await pumpConsole(tester);
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      expect(configPill('How it is reached'), findsOneWidget);
+      expect(configPill('When it starts'), findsOneWidget);
+      expect(configPill('This program'), findsNothing);
+
+      // And the address is what it opens on, because that is what most of
+      // Configuration is.
+      expect(find.text('Bind address'), findsOneWidget);
+    });
+
+    testWidgets('an AppImage is offered the third page', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: ConsoleState(
+                dir: '/data',
+                addr: '127.0.0.1:8099',
+                serverBinary: '/tmp/.mount_x/usr/bin/summareader-sync',
+                updatable: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      expect(configPill('This program'), findsOneWidget);
+      // The pill and nothing else: the page it names is not open yet.
+      expect(find.text('Check for updates'), findsNothing);
     });
 
     testWidgets('the way out is where the way in was', (tester) async {
@@ -679,6 +748,8 @@ void _theTwoPages() {
       );
       await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
+      await tester.tap(configPill('This program'));
+      await tester.pumpAndSettle();
 
       expect(find.text('9.9.9 is available'), findsOneWidget);
       expect(find.text('Downloading… 42%'), findsOneWidget);
@@ -716,8 +787,16 @@ void _theTwoPages() {
       await tester.tap(find.text('Configuration'));
       await tester.pumpAndSettle();
 
+      // Not on the page it would belong to, which is the only page it could
+      // be hiding on.
+      await tester.tap(configPill('When it starts'));
+      await tester.pumpAndSettle();
       expect(find.text('Start at login'), findsNothing);
       expect(find.text('Keep it running'), findsNothing);
+      expect(find.text('Start when this opens'), findsOneWidget);
+
+      await tester.tap(configPill('This program'));
+      await tester.pumpAndSettle();
       expect(find.text('Without this window'), findsOneWidget);
       expect(find.text('Check for updates'), findsOneWidget);
     });

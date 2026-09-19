@@ -256,6 +256,20 @@ class ConsoleView extends StatefulWidget {
   State<ConsoleView> createState() => _ConsoleViewState();
 }
 
+/// The subjects Configuration is divided into.
+///
+/// It was one column, and at the size this window opens at that column is
+/// better than twice the height of it — so whatever somebody came to change,
+/// they arrive by scrolling past the rest. One subject per page, named.
+enum ConfigPage {
+  reached('How it is reached'),
+  starting('When it starts'),
+  program('This program');
+
+  const ConfigPage(this.title);
+  final String title;
+}
+
 /// The one thing the console's body remembers: which of its two pages is up.
 ///
 /// A pushed route would have been less code, but the page it pushes is built
@@ -265,6 +279,8 @@ class ConsoleView extends StatefulWidget {
 /// everything else here.
 class _ConsoleViewState extends State<ConsoleView> {
   bool _settings = false;
+
+  ConfigPage _config = ConfigPage.reached;
 
   ConsoleState get state => widget.state;
 
@@ -330,16 +346,51 @@ class _ConsoleViewState extends State<ConsoleView> {
           ),
         ]),
       ),
-    _address(),
-    _withThisWindow(),
-    // Not in an AppImage. The unit's ExecStart would name the server binary
-    // inside this image's mount — a path that exists only while this window
-    // is open, and a different one every launch — so the switch would write a
-    // service that cannot start. The headless install is the answer there,
-    // and _thisProgram says so.
-    if (state.linux && !state.updatable) _atLogin(),
-    if (state.updatable) _thisProgram(),
+    _pages(),
+    // "This program" can stop existing between one poll and the next only in
+    // theory, but a page that is not offered must not be the page that is
+    // drawn either way.
+    ...switch (_config == ConfigPage.program && !state.updatable
+        ? ConfigPage.reached
+        : _config) {
+      ConfigPage.reached => [_address()],
+      ConfigPage.starting => [
+        _withThisWindow(),
+        // Not in an AppImage. The unit's ExecStart would name the server
+        // binary inside this image's mount — a path that exists only while
+        // this window is open, and a different one every launch — so the
+        // switch would write a service that cannot start. The headless
+        // install is the answer there, and _thisProgram says so.
+        if (state.linux && !state.updatable) _atLogin(),
+      ],
+      ConfigPage.program => [if (state.updatable) _thisProgram()],
+    },
   ]);
+
+  /// The page chooser: one pill per subject, the way the window spells
+  /// Configuration itself.
+  Widget _pages() => Padding(
+    padding: const EdgeInsets.only(bottom: 26),
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        // Only the pages that have something on them. Outside an AppImage
+        // there is no single file to replace, so "This program" would open on
+        // an explanation of why it is empty, which is worse than not being
+        // offered. The other two always have a control on them: every build
+        // has an address, and every build can be told to start the server
+        // when the window opens.
+        for (final page in ConfigPage.values)
+          if (page != ConfigPage.program || state.updatable)
+            Segment(
+              label: page.title,
+              selected: _config == page,
+              onTap: () => setState(() => _config = page),
+            ),
+      ],
+    ),
+  );
 
   /// The single column both pages are drawn in, at a width a paragraph is
   /// still readable at.
