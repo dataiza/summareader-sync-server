@@ -3,6 +3,34 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.5.0
+
+### The window can start the server itself
+
+Opening the console and pressing **Start** only ever has one answer on a
+machine set up for it. **Configuration → When it starts → Start with this
+window** makes opening the window the whole of it.
+
+Off unless it is turned on, and the setting is checked afresh at every launch
+rather than trusted: a file written where everything was present and read where
+something is missing is how a start nobody watched publishes a library. What
+must be present is what the server actually reaches for — a binary, a directory
+to keep the library in, an address to listen on. Where a unit owns the server
+there is nothing to check, because all three were settled when the unit was
+written.
+
+Never a stop, and never a second copy: a server already answering — a unit that
+came back at login, or another console left open on the same machine — is left
+where it is. Two writers on one database is the thing being avoided.
+
+### Configuration is three pages
+
+It was one column of two and a third screens. **How it is reached** carries the
+address and is where Configuration opens; **When it starts** carries the two
+switches that answer when the server comes up, which are one subject; **This
+program** carries the version and updates, and is offered only to a build that
+can replace itself.
+
 ## 0.4.0
 
 ### The way out is where the way in was
