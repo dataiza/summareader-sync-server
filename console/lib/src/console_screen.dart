@@ -70,6 +70,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// is on — and a poll two seconds later would otherwise put it back.
   bool _docker = false;
 
+  /// Whether opening this window starts the server. Held here as well as in
+  /// the file so the switch answers at once rather than two seconds later,
+  /// when the poll rebuilds the state.
+  bool _autostart = false;
+
   /// What the server calls itself. Empty means it has never been named, and
   /// PocketBase's own default — "Acme" — is what it answers with.
   String _name = '';
@@ -107,6 +112,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     _compose = exe == null ? null : composeFile(exe, _dir);
     _docker = serviceDocker();
     _name = (readConfig(widget.configDir)['name'] as String?) ?? '';
+    _autostart = readConfig(widget.configDir)['autostart'] == true;
 
     _state = ConsoleState(
       dir: _dir,
@@ -116,6 +122,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       serverBinary: exe,
       managed: serviceInstalled(),
       atLogin: serviceInstalled(),
+      autostart: _autostart,
       docker: _docker,
       compose: _compose != null,
       updatable: _updatable,
@@ -133,6 +140,17 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         await _offerTheMenu();
         await _offerToRepoint();
       });
+    }
+
+    // Opening the window is a start, when the file says so. Off unless it
+    // does, and never a stop — a window opening is no reason to take down a
+    // server somebody left running. After the first frame, and after the
+    // first-run questions above, so a dialog asking where the library goes is
+    // not answered by a server starting on the old directory underneath it.
+    if (_autostart) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_startUnasked()),
+      );
     }
 
     unawaited(_refresh());
@@ -193,6 +211,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         name: _name,
         serverBinary: _server.exe,
         atLogin: serviceInstalled(),
+        autostart: _autostart,
         // The unit is the truth once there is one; before that, whatever was
         // picked here.
         docker: serviceInstalled() ? serviceDocker() : _docker,
@@ -243,6 +262,48 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       _fail(error);
     }
     await _refresh();
+  }
+
+  /// The start nobody pressed.
+  ///
+  /// Whether it may start at all is [autostart]'s question, which is why the
+  /// prerequisites and the already-running check live there rather than here:
+  /// a window is the part of a program a test cannot look at.
+  Future<void> _startUnasked() async {
+    try {
+      final refusal = await autostart(
+        exe: _server.exe,
+        dir: _dir,
+        addr: _server.addr,
+        managed: _server.managed,
+        // Never a second copy. `running` knows only about a unit or this
+        // console's own child, so a server another console left up is found by
+        // asking the address itself.
+        alreadyUp: () async => await _server.running || await _server.healthy(),
+        start: _server.start,
+      );
+      if (refusal != null) _fail(refusal);
+    } on Object catch (error) {
+      _fail(error);
+    }
+    await _refresh();
+  }
+
+  /// Whether opening this window is by itself enough to start the server.
+  ///
+  /// Written and nothing else. What it governs happens at the next launch, and
+  /// starting the server because somebody turned the switch on would be one
+  /// control doing two things.
+  void _setAutostart(bool on) {
+    try {
+      saveConfig(widget.configDir, {'autostart': on});
+      setState(() {
+        _autostart = on;
+        _state = _state.withAutostart(on);
+      });
+    } on Object catch (error) {
+      _fail(error);
+    }
   }
 
   /// Rebinding is a restart, because a listening socket cannot be moved. The
@@ -785,6 +846,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       );
     },
     onAtLogin: _setAtLogin,
+    onAutostart: _setAutostart,
     onRename: _renameDevice,
     onRevoke: _revokeDevice,
     onResume: _resumeDevice,

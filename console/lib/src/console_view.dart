@@ -30,6 +30,7 @@ class ConsoleState {
     this.paired = const [],
     this.hosts = const [],
     this.atLogin = false,
+    this.autostart = false,
     this.docker = false,
     this.compose = false,
     this.linux = true,
@@ -80,6 +81,13 @@ class ConsoleState {
   final List<LanAddr> hosts;
 
   final bool atLogin;
+
+  /// Whether opening this window is by itself enough to start the server.
+  ///
+  /// A different thing from [atLogin], and the copy beside it says so: this
+  /// one lasts exactly as long as the window is open.
+  final bool autostart;
+
   final bool docker;
   final bool compose;
 
@@ -105,13 +113,15 @@ class ConsoleState {
     return 'Running on http://$addr';
   }
 
-  /// The same state with a different message, or none. Two one-line copiers
-  /// rather than a general copyWith: these are the only two fields anything
+  /// The same state with a different message, or none. One-line copiers
+  /// rather than a general copyWith: these are the only fields anything
   /// changes without rebuilding the whole thing from a poll.
   ConsoleState withError(String? message) =>
       _copy(error: message, keepError: false);
 
   ConsoleState withDocker(bool value) => _copy(docker: value);
+
+  ConsoleState withAutostart(bool value) => _copy(autostart: value);
 
   /// The two halves of the update flow, which move together: an offer with no
   /// line under it, a line with no offer, or neither.
@@ -127,6 +137,7 @@ class ConsoleState {
   );
 
   ConsoleState _copy({
+    bool? autostart,
     bool? docker,
     String? error,
     bool keepError = true,
@@ -145,6 +156,7 @@ class ConsoleState {
     paired: paired,
     hosts: hosts,
     atLogin: atLogin,
+    autostart: autostart ?? this.autostart,
     docker: docker ?? this.docker,
     compose: compose,
     linux: linux,
@@ -186,6 +198,7 @@ class ConsoleView extends StatefulWidget {
     this.onBind,
     this.onPort,
     this.onAtLogin,
+    this.onAutostart,
     this.onRunAs,
     this.onRename,
     this.onRevoke,
@@ -206,6 +219,12 @@ class ConsoleView extends StatefulWidget {
   final ValueChanged<String>? onBind;
   final ValueChanged<String>? onPort;
   final ValueChanged<bool>? onAtLogin;
+
+  /// Written and nothing else: what it governs happens at the next launch, and
+  /// starting the server because somebody turned the switch on would be one
+  /// control doing two things.
+  final ValueChanged<bool>? onAutostart;
+
   final ValueChanged<bool>? onRunAs;
   // The list was read-only: an operator could see every device and could not
   // rename or stop one, on a server they run. The dialogs live in the screen
@@ -312,6 +331,7 @@ class _ConsoleViewState extends State<ConsoleView> {
         ]),
       ),
     _address(),
+    _withThisWindow(),
     // Not in an AppImage. The unit's ExecStart would name the server binary
     // inside this image's mount — a path that exists only while this window
     // is open, and a different one every launch — so the switch would write a
@@ -806,6 +826,37 @@ class _ConsoleViewState extends State<ConsoleView> {
       ]),
     );
   }
+
+  /// The window's own convenience, and not the service below it.
+  ///
+  /// The distinction is the whole of the copy here. Start at login writes a
+  /// systemd unit and outlives this window by design; this one starts the
+  /// server when the window opens and lets it go when the window closes,
+  /// which is what the console already does with a server it started.
+  ///
+  /// Self-contained on purpose — one section, one row, no state shared with
+  /// anything around it — because this page is shortly to become a chooser and
+  /// this has to move in one piece.
+  Widget _withThisWindow() => _section(
+    'Start with this window',
+    'Opening the console starts the server, and closing it stops the server '
+        'again. Off unless it is switched on here.',
+    _card([
+      _row(
+        'Start when this opens',
+        ArSwitch(
+          value: state.autostart,
+          label: 'Start with this window',
+          onChanged: widget.onAutostart,
+        ),
+        hint:
+            'Checked afresh every launch: with no server binary, nowhere to '
+            'keep the library or no address to listen on, nothing is started '
+            'and this page says which. A server already running — a service, '
+            'or another console — is left where it is.',
+      ),
+    ]),
+  );
 
   Widget _atLogin() => _section(
     'Start at login',

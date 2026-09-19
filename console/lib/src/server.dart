@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'addresses.dart';
 import 'service.dart';
 
 /// One paired device, as /overview reports it.
@@ -136,6 +137,18 @@ class SyncServer {
 
   Future<bool> get running async =>
       managed ? await serviceActive() : _childRunning;
+
+  /// Whether something is already answering on this address.
+  ///
+  /// [running] only knows about servers this console has a handle on — its own
+  /// child, or a unit. A second console left open on the same machine is
+  /// neither, and starting beside it is two writers on one SQLite file.
+  ///
+  /// `/instance` and not `/overview`, because it is the one route that answers
+  /// without a credential: a server somebody else started holds a different
+  /// metrics token, and asking an authenticated route would read "nothing is
+  /// there" for a server that plainly is.
+  Future<bool> healthy() async => await _text('/instance') != null;
 
   Future<void> start() async {
     if (managed) {
@@ -326,6 +339,71 @@ class SyncServer {
       return null;
     }
   }
+}
+
+/// Why the console will not start the server on its own, or null when it may.
+///
+/// The list is what [SyncServer.start] and `serveArgv` actually reach for: a
+/// binary to run, a directory to hand it, and an address to bind. Named rather
+/// than counted, the way the refusals in updates.dart name what stopped them —
+/// a start that quietly did nothing is indistinguishable from a server that
+/// failed to bind, and this is the start nobody was watching.
+///
+/// The metrics token is deliberately not in the list. It is minted per window
+/// rather than read from anywhere, so it cannot be the thing that is missing.
+String? autostartRefusal({
+  required String? exe,
+  required String dir,
+  required String addr,
+  bool managed = false,
+}) {
+  // A unit carries its own ExecStart, so the binary, the directory and the
+  // address were all settled when it was installed and there is nothing left
+  // here to be absent. Starting it is a systemctl call and nothing else.
+  if (managed) return null;
+
+  final absent = [
+    if (exe == null || exe.isEmpty) 'no summareader-sync binary',
+    if (dir.trim().isEmpty) 'nowhere to keep the library',
+    if (addr.trim().isEmpty || splitBind(addr).$2.trim().isEmpty)
+      'no address to listen on',
+  ];
+  if (absent.isEmpty) return null;
+  return 'Not starting the server on its own: ${absent.join(', ')}. '
+      'Start does the same thing by hand once that is sorted out, and says '
+      'the same if it is not. Nothing has been started.';
+}
+
+/// The start nobody pressed.
+///
+/// A function rather than three lines inside the window, because whether an
+/// unattended start happened, and what it said when it would not, is the whole
+/// of this feature — and a window is the part of a program a test cannot look
+/// at. [alreadyUp] and [start] are injected for the same reason.
+///
+/// Returns null when there is nothing to say: either the server was started,
+/// or one was already up and was left exactly where it was. Never a stop.
+Future<String?> autostart({
+  required String? exe,
+  required String dir,
+  required String addr,
+  required bool managed,
+  required Future<bool> Function() alreadyUp,
+  required Future<void> Function() start,
+}) async {
+  // Checked here rather than trusted: a setting written on a machine that had
+  // a server binary, and read on one that does not, is how an unattended start
+  // turns into a window quietly reporting nothing.
+  final refused = autostartRefusal(
+    exe: exe,
+    dir: dir,
+    addr: addr,
+    managed: managed,
+  );
+  if (refused != null) return refused;
+  if (await alreadyUp()) return null;
+  await start();
+  return null;
 }
 
 /// Picks one unlabelled sample out of the Prometheus text format. Enough for

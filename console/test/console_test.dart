@@ -22,6 +22,7 @@ void main() {
   _theFirstRun();
   _changingTheDirectory();
   _deviceControls();
+  _startingWithTheWindow();
   _serverIssuedCode();
 
   // The unit file is written by the console and read by systemd, and nothing
@@ -424,6 +425,143 @@ void _serverIssuedCode() {
   });
 }
 
+/// The window's own convenience, which is not the systemd unit above it.
+///
+/// A start nobody watched is the one start that has to be checked rather than
+/// trusted, so what is asserted here is mostly the refusals: which of them is
+/// given, what it names, and that nothing was started when one was.
+void _startingWithTheWindow() {
+  group('starting the server when the window opens', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('console-autostart'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('the switch survives the window being closed', () {
+      File(configPath(dir.path)).writeAsStringSync('{"http":"1.2.3.4:9"}');
+      saveConfig(dir.path, {'autostart': true});
+
+      final values = readConfig(dir.path);
+      expect(values['autostart'], isTrue);
+      // One key, merged into whatever else is in there. A setting that took
+      // the bind address with it would be a worse bug than the one it fixes.
+      expect(values['http'], '1.2.3.4:9');
+
+      saveConfig(dir.path, {'autostart': false});
+      expect(readConfig(dir.path)['autostart'], isFalse);
+    });
+
+    test('everything present is a start', () async {
+      var started = false;
+      final said = await autostart(
+        exe: '/usr/bin/summareader-sync',
+        dir: '/data',
+        addr: '127.0.0.1:8099',
+        managed: false,
+        alreadyUp: () async => false,
+        start: () async => started = true,
+      );
+
+      expect(said, isNull);
+      expect(started, isTrue);
+    });
+
+    test('what is absent is named, and nothing is started', () async {
+      var started = false;
+      Future<String?> tryIt({
+        String? exe,
+        String dir = '/data',
+        String addr = '127.0.0.1:8099',
+      }) => autostart(
+        exe: exe,
+        dir: dir,
+        addr: addr,
+        managed: false,
+        alreadyUp: () async => false,
+        start: () async => started = true,
+      );
+
+      expect(
+        await tryIt(),
+        allOf(
+          contains('no summareader-sync binary'),
+          contains('Nothing has been started.'),
+        ),
+      );
+      expect(
+        await tryIt(exe: '/usr/bin/summareader-sync', dir: '  '),
+        contains('nowhere to keep the library'),
+      );
+      expect(
+        await tryIt(exe: '/usr/bin/summareader-sync', addr: ''),
+        contains('no address to listen on'),
+      );
+      // The one thing every refusal has to have in common.
+      expect(started, isFalse);
+    });
+
+    test('a server already up is left where it is', () async {
+      var started = false;
+      final said = await autostart(
+        exe: '/usr/bin/summareader-sync',
+        dir: '/data',
+        addr: '127.0.0.1:8099',
+        managed: false,
+        alreadyUp: () async => true,
+        start: () async => started = true,
+      );
+
+      // Nothing to say and nothing done: a unit that came back at login, or
+      // another console left open, is not something to start a second copy
+      // beside — and it is certainly not something to stop.
+      expect(said, isNull);
+      expect(started, isFalse);
+    });
+
+    test('a unit brings its own argv, so nothing here can be missing', () {
+      expect(
+        autostartRefusal(exe: null, dir: '', addr: '', managed: true),
+        isNull,
+      );
+    });
+
+    testWidgets('the switch is on the settings page, beside the service', (
+      tester,
+    ) async {
+      const state = ConsoleState(
+        dir: '/data',
+        addr: '127.0.0.1:8099',
+        serverBinary: '/bin/summareader-sync',
+        autostart: true,
+      );
+      var asked = <bool>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(state: state, onAutostart: asked.add),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+
+      final switched = find.byWidgetPredicate(
+        (widget) =>
+            widget is ArSwitch && widget.label == 'Start with this window',
+      );
+      expect(switched, findsOneWidget);
+      expect(tester.widget<ArSwitch>(switched).value, isTrue);
+
+      // The page scrolls, and this section is below the fold at the size a
+      // widget test renders at.
+      await tester.ensureVisible(switched);
+      await tester.pumpAndSettle();
+      await tester.tap(switched);
+      await tester.pumpAndSettle();
+      expect(asked, [false]);
+    });
+  });
+}
+
 void _theTwoPages() {
   group('the window and what Configuration keeps off it', () {
     // Linux and a binary present, which is the only state in which every
@@ -474,6 +612,7 @@ void _theTwoPages() {
         'Data directory',
         'Start at login',
         'Keep it running',
+        'Start with this window',
       ]) {
         expect(find.text(moved), findsWidgets, reason: moved);
       }
