@@ -46,3 +46,8 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Golden-test failure artifacts. Written by a failing run, useful for the
+# minute it takes to look at them, and never worth keeping: four PNGs per
+# failure, committed once by accident and modified by every run since.
+test/failures/

@@ -3,7 +3,7 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 0.6.0
 
 ### A device hears about another device in seconds
 
