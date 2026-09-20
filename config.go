@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,14 @@ type Config struct {
 	Name string `json:"name,omitempty"`
 	// Do not advertise this server on the local network.
 	NoAnnounce bool `json:"no_announce,omitempty"`
+	// How long /subscribe holds a request open, in seconds.
+	//
+	// Zero — the default — means [defaultHold]. A deliberate zero is spelled
+	// by setting it negative, which switches the wait off and restores the
+	// old answer-at-once behaviour; a deployment behind something that cannot
+	// hold a connection at all needs that, and "unset" and "off" have to be
+	// different answers.
+	HoldSeconds int `json:"hold_seconds,omitempty"`
 }
 
 // Precedence, everywhere below: command-line flag > environment variable >
@@ -159,6 +168,11 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_HOLD")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.HoldSeconds = n
+		}
 	}
 	return cfg, nil
 }

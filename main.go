@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ var stopAnnouncing = func() {}
 // What the config file and the environment said, read once at startup. The
 // flags are still cobra's, and still win: everything here is only a default.
 var settings Config
+
+// Who is waiting to be told something arrived. See hints.go.
+var waiting = newHints()
 
 func main() {
 	var err error
@@ -380,6 +384,12 @@ func handleAppend(e *core.RequestEvent) error {
 		})
 	}
 
+	// Everyone else on this account, but never the device that just wrote:
+	// it knows, and telling it would sync in response to itself for ever.
+	// After the write and before the response, so a device already waiting is
+	// on its way back before this one has finished being answered.
+	waiting.post(accountID, deviceID)
+
 	return e.JSON(http.StatusOK, appendResponse{Seq: seq})
 }
 
@@ -438,6 +448,12 @@ func handleAppendBatch(e *core.RequestEvent) error {
 			"error": "append failed",
 		})
 	}
+
+	// Everyone else on this account, but never the device that just wrote:
+	// it knows, and telling it would sync in response to itself for ever.
+	// After the write and before the response, so a device already waiting is
+	// on its way back before this one has finished being answered.
+	waiting.post(accountID, deviceID)
 
 	return e.JSON(http.StatusOK, appendBatchResponse{
 		Seq:   seq,
@@ -530,8 +546,25 @@ func handleGetBlob(e *core.RequestEvent) error {
 // It says "there is something new, come and get it" and carries no payload and
 // no count. A count would tell whoever carries the message how much this user
 // reads and when, which is exactly what the encryption is for.
+//
+// # Why it waits
+//
+// It used to answer at once, and the comment here said "long-polling rather
+// than a websocket for now" while doing neither. The cost was a device finding
+// out on its own timer: a phone marking something read and a desktop hearing
+// about it were fifteen minutes apart.
+//
+// So a caller that says where it has got to — `?since=N` — is held until the
+// log passes N or the hold expires, whichever comes first. **A hold that
+// expires and a log that has not moved are the same answer**, which is what
+// keeps this a hint rather than a protocol: there is no event, no error case,
+// and a caller that ignores the wait entirely still works.
+//
+// Without `since` it answers immediately, exactly as it always did. That is
+// not a fallback, it is what the first call of a sync wants — it is asking
+// where the log is, not waiting for it to move.
 func handleSubscribe(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
+	accountID, deviceID, ok := authenticate(e)
 	if !ok {
 		return e.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "unknown or revoked device",
@@ -545,17 +578,68 @@ func handleSubscribe(e *core.RequestEvent) error {
 		})
 	}
 
+	// Parked before the second read of the head, never after. A hint posted
+	// in the gap between reading and waiting would be missed, and the device
+	// would then sit out the whole hold over a change that had already
+	// happened — the classic lost wakeup, and the reason the order here is
+	// not an accident.
+	if since, waitFor := subscribeHold(e, head); waitFor > 0 {
+		hinted, done := waiting.wait(accountID, deviceID)
+		defer done()
+
+		if head, err = headSeq(e.App, accountID); err != nil {
+			return e.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "unavailable",
+			})
+		}
+		if head <= since {
+			timer := time.NewTimer(waitFor)
+			defer timer.Stop()
+			select {
+			case <-hinted:
+				// Re-read rather than trust the hint, which carries no number.
+				if head, err = headSeq(e.App, accountID); err != nil {
+					return e.JSON(http.StatusInternalServerError, map[string]string{
+						"error": "unavailable",
+					})
+				}
+			case <-timer.C:
+			case <-e.Request.Context().Done():
+				// The device went away — backgrounded, or the network moved.
+				// Nothing to answer, and answering a dead connection is the
+				// one thing a held request must not spend time on.
+				return nil
+			}
+		}
+	}
+
 	// The receipt rides along, so a device that finds an empty log learns why
 	// in the same round trip that told it the log is empty.
 	receipt, _ := receiptFor(e.App, accountID)
 
-	// Long-polling rather than a websocket for now: the client already polls
-	// on resume, and a socket is a reconnection state machine to maintain for
-	// a message that says "poll now".
 	return e.JSON(http.StatusOK, map[string]any{
 		"head":    head,
 		"receipt": receipt,
 	})
+}
+
+// subscribeHold reads `?since=N` and says how long to wait for it.
+//
+// Zero means answer now: no `since`, an unreadable one, one the log has
+// already passed, or a server configured not to hold at all.
+func subscribeHold(e *core.RequestEvent, head int64) (int64, time.Duration) {
+	raw := e.Request.URL.Query().Get("since")
+	if raw == "" {
+		return 0, 0
+	}
+	since, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || since < 0 {
+		return 0, 0
+	}
+	if head > since {
+		return since, 0
+	}
+	return since, holdFor(settings.HoldSeconds)
 }
 
 type wipeRequest struct {
