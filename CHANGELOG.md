@@ -3,6 +3,13 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## Unreleased
+
+- **Restart now works after downloading an update.** The button drew, and
+  pressing it did nothing: the window never handed it anything to do. The
+  update itself was always installed correctly — only the last step, using it
+  without quitting and reopening the window yourself, was missing.
+
 ## 0.6.0
 
 ### A device hears about another device in seconds

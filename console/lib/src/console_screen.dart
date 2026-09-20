@@ -857,6 +857,30 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onDownloadUpdate: _downloadUpdate,
     onDismissUpdate: () =>
         setState(() => _state = _state.withUpdate(offer: null, said: null)),
+    // Never supplied until 2026-09-21, so *Restart now* was a button with no
+    // callback: it drew, it was pressed, and nothing happened. `restartInto`
+    // has been here and correct the whole time — it was simply never called
+    // from this window, and the console this one shares its shape with calls
+    // it from the equivalent place.
+    onRestart: () async {
+      final image = _state.updateInstalled;
+      if (image == null) return;
+      final refusal = await restartInto(image);
+      // Only reached when the new program did not start: the other branch
+      // replaces this process and does not return.
+      if (refusal != null && mounted) {
+        // `installed` again, deliberately: `withUpdate` replaces the whole
+        // group rather than merging into it, so leaving it out would take the
+        // button away at exactly the moment somebody wants to press it again.
+        setState(
+          () => _state = _state.withUpdate(
+            offer: null,
+            said: refusal,
+            installed: image,
+          ),
+        );
+      }
+    },
     onRunAs: _setRunAs,
   );
 }
