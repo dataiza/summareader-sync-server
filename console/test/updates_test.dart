@@ -483,6 +483,20 @@ void main() {
       expect(state.updateInstalled, endsWith('-9.9.9-x86_64.AppImage'));
     });
 
+    testWidgets('and the button is wired to something', (tester) async {
+      // The state was tested and the callback was not, so *Restart now* drew,
+      // was pressed, and did nothing — for as long as this window has had an
+      // updater. `restartInto` was here and correct the whole time; nothing
+      // called it.
+      await downloaded(tester);
+
+      expect(
+        view(tester).onRestart,
+        isNotNull,
+        reason: 'the button has no callback, so pressing it does nothing',
+      );
+    });
+
     testWidgets('and the poll two seconds later keeps it', (tester) async {
       await downloaded(tester);
       // The bug this exists for: the field was set correctly and then left out
