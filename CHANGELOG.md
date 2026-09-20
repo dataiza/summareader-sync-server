@@ -3,7 +3,7 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 0.6.1
 
 - **Restart now works after downloading an update.** The button drew, and
   pressing it did nothing: the window never handed it anything to do. The
