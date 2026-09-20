@@ -21,7 +21,6 @@ Built releases are on the [Releases](../../releases/latest) page.
 | | For | File |
 |---|---|---|
 | **Console, Linux** | a desktop, with a window | `SummaReaderSync-<version>-x86_64.AppImage` |
-| **Console, macOS** | a Mac, with a window | `summareader-sync-console-macos.zip` |
 | **Headless** | a server reached over the network | `summareader-sync-headless-<os>-<arch>.tar.gz` (`.zip` on Windows) |
 | Console, Linux, unpacked | packaging it yourself | `summareader-sync-console-linux-x64.tar.gz` |
 
@@ -80,7 +79,6 @@ tar -xzf summareader-sync-console-linux-x64.tar.gz
 ```
 
 ```sh
-# macOS — unzip summareader-sync-console-macos.zip, then open the .app
 ```
 
 The console carries its own copy of the server binary beside it. Nothing else

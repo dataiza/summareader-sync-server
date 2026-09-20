@@ -164,8 +164,6 @@ jobs:
         include:
           - os: linux
             runner: ubuntu-latest
-          - os: macos
-            runner: macos-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -234,7 +232,14 @@ jobs:
           # .AppImage among them: it is the download a person actually takes
           # on Linux, and the only one that can update itself. A release
           # missing it would quietly send everyone back to unpacking tarballs.
-          for want in headless-linux-amd64 console-linux-x64 console-macos .AppImage; do
+          #
+          # No console-macos since 2026-09-20. It was unsigned, so it opened by
+          # right-click past a warning; there is no store route for a console
+          # and nobody is being asked to run one on a Mac. Demanding an asset
+          # that is no longer built would refuse to publish every release,
+          # which is the failure this loop exists to prevent, arriving from the
+          # other direction.
+          for want in headless-linux-amd64 console-linux-x64 .AppImage; do
             echo "$assets" | grep -q "$want" || {
               echo "::error::nothing matching $want was uploaded"
               exit 1
