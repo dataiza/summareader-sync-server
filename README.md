@@ -160,6 +160,15 @@ Every flag is also an environment variable (`SUMMAREADER_HTTP`,
 `summareader-sync.json` beside the data directory. Flag beats environment beats
 file. See [RUNNING.md](RUNNING.md#configuration).
 
+`SUMMAREADER_HOLD` is seconds, and is the one setting a reverse proxy can make
+you need. `/subscribe` holds a request open so a device hears about another
+device in seconds rather than on its own timer; the default is 45, under the
+sixty seconds proxies commonly close an idle request at. Lower it if yours is
+stricter. A **negative** number switches the wait off and restores the old
+answer-at-once behaviour, which is what a deployment that cannot hold a
+connection at all needs — unset means the default, so the two are different
+answers.
+
 ### Manage devices
 
 ```sh

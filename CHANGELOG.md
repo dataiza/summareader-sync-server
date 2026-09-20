@@ -3,6 +3,33 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## Unreleased
+
+### A device hears about another device in seconds
+
+`/subscribe` holds the request open. A device says where it has got to, and the
+answer comes when the log passes that point or when the server has held on long
+enough — and those are deliberately the same answer, so nothing here is an
+event and nothing is an error. The hint still carries no payload and no count.
+
+It is the other half of something that has worked for a long time: a phone has
+pushed a change out five seconds after you mark an article read, and the
+desktop then found out on its own timer, up to fifteen minutes later.
+
+**Not PocketBase's realtime API**, which was the obvious answer and does not
+fit: it gates subscriptions on `@request.auth` and so needs a PocketBase auth
+record per subscriber, where this server authenticates a device token of its
+own against its own tables.
+
+The device that wrote is never woken by its own append — it knows, and telling
+it would make it sync in response to itself for ever.
+
+`SUMMAREADER_HOLD` sets how long, in seconds; 45 by default, under the sixty a
+reverse proxy commonly closes an idle request at. A negative number switches
+the wait off entirely, for a deployment that cannot hold a connection open. An
+older client that never sends `since` is answered immediately, exactly as
+before.
+
 ## 0.5.0
 
 ### The window can start the server itself
