@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:summareader_sync_console/src/config.dart';
 import 'package:summareader_sync_console/src/console_screen.dart';
 import 'package:summareader_sync_console/src/console_view.dart';
 import 'package:summareader_sync_console/src/desktop_entry.dart';
@@ -508,6 +509,45 @@ void main() {
       expect(view(tester).state.updateInstalled, isNotNull);
     });
   });
+
+  group('keeping it up to date without being asked', () {
+    test('the setting is written where the server config is', () async {
+      // Beside the address and the token, so one directory is the whole
+      // installation and the answer survives a restart.
+      final dir = await Directory.systemTemp.createTemp('auto-update');
+      addTearDown(() => dir.delete(recursive: true));
+
+      saveConfig(dir.path, {'autoUpdate': true});
+
+      expect(readConfig(dir.path)['autoUpdate'], isTrue);
+    });
+
+    test('and it is off in a file that has never heard of it', () async {
+      // Off unless switched on: a window that asks the network about itself
+      // before anybody said so is a window nobody chose.
+      final dir = await Directory.systemTemp.createTemp('auto-update');
+      addTearDown(() => dir.delete(recursive: true));
+      saveConfig(dir.path, {'addr': ':8080'});
+
+      expect(readConfig(dir.path)['autoUpdate'], isNot(true));
+    });
+
+    test('turning it on leaves every other key alone', () async {
+      // `saveConfig` writes back only the keys given, which is what keeps a
+      // newer server's settings through a change made here.
+      final dir = await Directory.systemTemp.createTemp('auto-update');
+      addTearDown(() => dir.delete(recursive: true));
+      saveConfig(dir.path, {'addr': ':9000', 'somethingNewer': 7});
+
+      saveConfig(dir.path, {'autoUpdate': true});
+
+      final after = readConfig(dir.path);
+      expect(after['addr'], ':9000');
+      expect(after['somethingNewer'], 7);
+      expect(after['autoUpdate'], isTrue);
+    });
+  });
+
 }
 
 /// What the window is drawing right now.
