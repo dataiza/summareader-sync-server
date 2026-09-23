@@ -40,6 +40,7 @@ class ConsoleState {
     this.updatable = false,
     this.updateOffer,
     this.updateSaid,
+    this.autoUpdate = false,
     this.updateInstalled,
   });
 
@@ -62,6 +63,12 @@ class ConsoleState {
   /// owns. A tarball or a `flutter run` shows neither control, because both
   /// would act on something nobody chose.
   final bool updatable;
+
+  /// Whether the console looks for a new release without being asked.
+  ///
+  /// Off unless switched on. A window that asks the network about itself
+  /// before anybody said so is a window nobody chose.
+  final bool autoUpdate;
 
   final String dir;
   final String addr;
@@ -132,9 +139,15 @@ class ConsoleState {
   }) => _copy(
     updateOffer: offer,
     updateSaid: said,
+    autoUpdate: autoUpdate,
     updateInstalled: installed,
     keepUpdate: false,
   );
+
+  /// The switch alone, without disturbing whatever the update section is
+  /// saying: `withUpdate` replaces that whole group, and flipping a setting
+  /// should not clear a download's progress line.
+  ConsoleState withAutoUpdate(bool on) => _copy(autoUpdate: on);
 
   ConsoleState _copy({
     bool? autostart,
@@ -143,6 +156,7 @@ class ConsoleState {
     bool keepError = true,
     Release? updateOffer,
     String? updateSaid,
+    bool? autoUpdate,
     String? updateInstalled,
     bool keepUpdate = true,
   }) => ConsoleState(
@@ -172,6 +186,7 @@ class ConsoleState {
     // second.
     updateOffer: keepUpdate ? this.updateOffer : updateOffer,
     updateSaid: keepUpdate ? this.updateSaid : updateSaid,
+    autoUpdate: autoUpdate ?? this.autoUpdate,
     // The third of the set, and left out of it until now: a download wrote
     // where the new image is and this dropped it on the way through, so the
     // line about restarting arrived without the button that does it.
@@ -206,6 +221,7 @@ class ConsoleView extends StatefulWidget {
     this.onRemove,
     this.onName,
     this.onDir,
+    this.onAutoUpdate,
     this.onCheckUpdates,
     this.onDownloadUpdate,
     this.onDismissUpdate,
@@ -242,6 +258,7 @@ class ConsoleView extends StatefulWidget {
 
   /// Asked for by a press. Absent unless this is an AppImage — see
   /// [ConsoleState.updatable].
+  final ValueChanged<bool>? onAutoUpdate;
   final VoidCallback? onCheckUpdates;
 
   /// Accept the offered release, and put the offer away again.
@@ -506,6 +523,21 @@ class _ConsoleViewState extends State<ConsoleView> {
             'Asks GitHub for the newest release. Nothing is checked until you '
             'press it, and nothing is replaced until you say so.',
       ),
+      // The same two steps without being asked, for a machine nobody looks
+      // at — which is most of the machines a server runs on.
+      if (state.updatable)
+        _row(
+          'Keep it up to date',
+          ArSwitch(
+            value: state.autoUpdate,
+            label: 'Keep it up to date',
+            onChanged: widget.onAutoUpdate,
+          ),
+          hint:
+              'Looks once when this opens and then daily, downloads what it '
+              'finds, and puts it in place. Nothing running is interrupted: '
+              'the console and the server carry on until you restart them.',
+        ),
       // Found, and waiting to be told to go ahead.
       if (state.updateOffer case final offer?)
         _row(

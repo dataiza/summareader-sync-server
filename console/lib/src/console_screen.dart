@@ -91,6 +91,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
     _dir = widget.dir;
 
+    // Read before anything is drawn, so the switch is not off for a frame on
+    // a machine where it has been on for months.
+    final wantsAuto = readConfig(_dir)['autoUpdate'] == true;
+
     final exe = serverBinary();
 
     // A service installed on an earlier run owns the server, and its address
@@ -126,6 +130,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       docker: _docker,
       compose: _compose != null,
       updatable: _updatable,
+      autoUpdate: wantsAuto,
     );
 
     // After the first frame, because a dialog needs a Navigator and there is
@@ -155,11 +160,20 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
     unawaited(_refresh());
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+
+    // Once on launch and then daily, and only when it was switched on. A
+    // server runs on a machine nobody looks at, so an update that waits to
+    // be asked for is an update that never happens.
+    if (wantsAuto && _updatable) {
+      _autoUpdateTimer = Timer.periodic(_autoUpdateEvery, (_) => _autoUpdate());
+      unawaited(_autoUpdate());
+    }
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    _autoUpdateTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -457,6 +471,47 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     } on Object catch (error) {
       if (mounted) _fail(error);
     }
+  }
+
+  /// How often the automatic check asks, once it has asked on launch.
+  ///
+  /// Daily rather than hourly: a release is not a thing that happens between
+  /// breakfast and lunch, and a console that polls GitHub all day is a window
+  /// talking to the network for no reason.
+  static const _autoUpdateEvery = Duration(hours: 24);
+
+  Timer? _autoUpdateTimer;
+
+  /// Looks for a release and installs what it finds, without being asked.
+  ///
+  /// **Downloaded now, applied next launch.** `replaceRunningImage` renames
+  /// the new file over the old one and the kernel holds the running inode, so
+  /// nothing on screen and nothing being served is interrupted — the console
+  /// simply says a new version is in place, and *Restart now* is there when
+  /// somebody wants it.
+  ///
+  /// **The server is not restarted.** It is answering other devices, and a
+  /// restart on a machine nobody is watching drops whatever is in flight.
+  Future<void> _autoUpdate() async {
+    if (!_state.autoUpdate || !_updatable) return;
+    try {
+      final found = await const GitHubUpdates().newer();
+      if (found == null || !mounted) return;
+      await _downloadUpdate(found);
+    } on Object {
+      // A machine with no network is the ordinary case for this, not a
+      // failure worth putting on the screen: nobody asked, so nobody is
+      // waiting for an answer. The manual button still reports everything.
+    }
+  }
+
+  Future<void> _setAutoUpdate(bool on) async {
+    setState(() => _state = _state.withAutoUpdate(on));
+    saveConfig(_dir, {'autoUpdate': on});
+    _autoUpdateTimer?.cancel();
+    if (!on) return;
+    _autoUpdateTimer = Timer.periodic(_autoUpdateEvery, (_) => _autoUpdate());
+    await _autoUpdate();
   }
 
   /// Whether this is an AppImage: the one form that is a single file this
@@ -853,6 +908,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     onRemove: _removeDevice,
     onName: _rename,
     onDir: _relocate,
+    onAutoUpdate: _setAutoUpdate,
     onCheckUpdates: _checkUpdates,
     onDownloadUpdate: _downloadUpdate,
     onDismissUpdate: () =>
