@@ -3,6 +3,24 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.7.0
+
+The console can keep itself up to date. A server runs on a machine nobody
+looks at, so an update that waits to be asked for is an update that never
+happens. Switched on — it is off until it is — the console looks once when it
+opens and daily after that, downloads what it finds and puts it in place.
+
+Nothing running is interrupted. The new image is written over the old one
+while the old one is still running, which is safe and looks as though it
+should not be: the console and the server carry on, the page says a new
+version is in place, and *Restart now* is there when it suits. **The server
+itself is not restarted** — it is answering other devices, and a restart on a
+machine nobody is watching drops whatever is in flight.
+
+A check that fails says nothing at all. Nobody asked, so nobody is waiting
+for an answer, and a machine with no network is the ordinary case rather than
+a fault worth reporting. The button still reports everything.
+
 ## 0.6.1
 
 - **Restart now works after downloading an update.** The button drew, and
