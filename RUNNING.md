@@ -88,6 +88,7 @@ A server with no config file behaves exactly as it did before there was one.
 | `--dir` | `SUMMAREADER_DIR` | `dir` | where the database lives |
 | — | `SUMMAREADER_METRICS_TOKEN` | `metrics_token` | the credential `/metrics` wants; empty means the endpoint is off |
 | `--no-announce` | `SUMMAREADER_NO_ANNOUNCE` | `no_announce` | do not advertise on the local network |
+| `--supervisor-pid` | — | — | stop when that process is gone; the console passes its own pid so a killed window does not leave a server behind |
 | `--config` | `SUMMAREADER_CONFIG` | — | where the file itself is |
 
 The file lives **inside the data directory**, as `summareader-sync.json`, so

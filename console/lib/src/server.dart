@@ -163,7 +163,9 @@ class SyncServer {
       );
     }
 
-    final argv = serveArgv(binary, addr, dir);
+    // The console's own pid goes with it, so the child can end itself if this
+    // window is killed outright rather than closed. See [supervisedArgv].
+    final argv = supervisedArgv(binary, addr, dir, pid);
     // A token minted per window and written nowhere is what switches the
     // metrics endpoints on. The status pane reads those rather than opening
     // the database beside the server: the counts already exist over HTTP, and
@@ -234,7 +236,14 @@ class SyncServer {
         await response.drain<void>();
         return null;
       }
-      return await response.transform(utf8.decoder).join();
+      // The body has its own deadline. request.close() only gets as far as the
+      // headers, so an address that answers and then stops talking left this
+      // waiting for as long as it cared to — on the poll that is a tick that
+      // never finishes, and on a button it is the button.
+      return await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 2));
     } on Exception {
       return null;
     } finally {
@@ -372,6 +381,40 @@ String? autostartRefusal({
   return 'Not starting the server on its own: ${absent.join(', ')}. '
       'Start does the same thing by hand once that is sorted out, and says '
       'the same if it is not. Nothing has been started.';
+}
+
+/// Why the Start button will not start the server, or null when it may.
+///
+/// Beside [autostartRefusal] and for the same reasons: what a refused start
+/// said is the whole of the feature, and a window is the part of a program a
+/// test cannot look at.
+///
+/// [SyncServer.running] knows only about a unit or this console's own child, so
+/// a server another console left up is neither — and starting into an address
+/// it holds is a child that cannot bind and exits a moment later, leaving the
+/// window saying *Stopped* with nothing said about why. That was the report.
+///
+/// Whatever is there is left where it is. It may be a unit somebody installed
+/// on purpose, or another user's server: not this console's to stop, and
+/// certainly not something to make room for by force.
+Future<String?> startRefusal({
+  required String addr,
+  required Future<bool> Function() healthy,
+}) async {
+  // A button handler waits a short while and no longer. [SyncServer.healthy]
+  // bounds itself at about four seconds in the worst case, and this is the
+  // backstop for the rest: an address that half-answers should refuse the
+  // press, not hang the control it was pressed on. Nothing was started either
+  // way, and the next press asks again.
+  final answering = await healthy().timeout(
+    const Duration(seconds: 5),
+    onTimeout: () => false,
+  );
+  if (!answering) return null;
+
+  return 'Something is already serving on $addr, and it is not this window\'s '
+      'server. Stop it where it was started, or give this one another address. '
+      'Nothing has been started.';
 }
 
 /// The start nobody pressed.
