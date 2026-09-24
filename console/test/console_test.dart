@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -522,6 +523,79 @@ void _startingWithTheWindow() {
         autostartRefusal(exe: null, dir: '', addr: '', managed: true),
         isNull,
       );
+    });
+
+    // 433: the console's own child is told whose going it should notice, and
+    // the unit's server is told nothing of the kind. A server that outlives the
+    // window that started it holds the address nobody can see or free; a unit
+    // that stopped when a window closed would be the same mistake in reverse.
+    test(
+      'the console\'s own child is given a supervisor and a unit is not',
+      () {
+        final argv = supervisedArgv(
+          '/bin/summareader-sync',
+          '1.2.3.4:9',
+          '/d',
+          42,
+        );
+
+        expect(
+          argv,
+          containsAllInOrder(
+            serveArgv('/bin/summareader-sync', '1.2.3.4:9', '/d'),
+          ),
+        );
+        expect(argv.last, '--supervisor-pid=42');
+
+        expect(
+          renderUnit(
+            const ServiceConfig(
+              exe: '/bin/summareader-sync',
+              addr: '1.2.3.4:9',
+              dir: '/d',
+              token: 'sesame',
+            ),
+          ),
+          isNot(contains('--supervisor-pid')),
+        );
+      },
+    );
+
+    // 434: the button asked `running` and nothing else, so a press against an
+    // address another server held started a child that could not bind and left
+    // the window reading Stopped with no reason given.
+    group('pressing Start against an address already in use', () {
+      test('refuses, names the address, and starts nothing', () async {
+        final refusal = await startRefusal(
+          addr: '10.0.0.4:8099',
+          healthy: () async => true,
+        );
+
+        expect(refusal, isNotNull);
+        expect(refusal, contains('10.0.0.4:8099'));
+        // Whatever is there is left alone, which is the other half of the
+        // decision: it may be a unit somebody installed on purpose.
+        expect(refusal, contains('Nothing has been started.'));
+      });
+
+      test('nothing answering is no refusal at all', () async {
+        expect(
+          await startRefusal(addr: '10.0.0.4:8099', healthy: () async => false),
+          isNull,
+        );
+      });
+
+      test('an address that never answers does not keep the button', () async {
+        // The press is a refusal to hang on, not a hang. Timing out where a
+        // real half-answering server would is deliberately not simulated with a
+        // real clock: what is asserted is that the wait has an end.
+        final refusal = await startRefusal(
+          addr: '10.0.0.4:8099',
+          healthy: () => Completer<bool>().future,
+        ).timeout(const Duration(seconds: 10), onTimeout: () => 'hung');
+
+        expect(refusal, isNull);
+      }, timeout: const Timeout(Duration(seconds: 20)));
     });
 
     testWidgets('the switch is on the settings page, beside the service', (

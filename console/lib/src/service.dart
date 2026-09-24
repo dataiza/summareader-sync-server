@@ -29,6 +29,19 @@ List<String> serveArgv(String exe, String addr, String dir) => [
   '--dir=$dir',
 ];
 
+/// The same argv, plus the one flag a child this console started gets: the pid
+/// it should stop when it sees it go.
+///
+/// Deliberately not inside [serveArgv], because that list is also the unit's
+/// ExecStart and a unit's server has no console to outlive — being left running
+/// is the entire point of having installed one. A supervisor pid in there would
+/// be a server that stops itself the first time somebody closes a window, or,
+/// worse, when a later process happens to be given that number.
+List<String> supervisedArgv(String exe, String addr, String dir, int pid) => [
+  ...serveArgv(exe, addr, dir),
+  '--supervisor-pid=$pid',
+];
+
 /// Everything that differs between one installation and the next. A null
 /// [compose] means the unit runs the binary directly.
 class ServiceConfig {

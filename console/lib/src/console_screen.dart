@@ -62,6 +62,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   late SyncServer _server;
   late ConsoleState _state;
   Timer? _poll;
+  final List<StreamSubscription<ProcessSignal>> _signals = [];
   List<LanAddr> _lan = const [];
   String? _compose;
 
@@ -158,6 +159,26 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       );
     }
 
+    // Being told to go away, as distinct from being asked. See
+    // [_stopWhatWeStarted]: this is the half of the same shutdown that
+    // [didRequestAppExit] never hears about, because Flutter only reports a
+    // graceful quit and `kill`, a logout and a session ending are not one.
+    //
+    // Watching a signal takes over from dying of it, so each of these has to
+    // leave through exit itself once the child is down. Not on Windows, where
+    // sigterm cannot be watched at all and a window is closed rather than
+    // signalled.
+    if (!Platform.isWindows) {
+      for (final signal in [ProcessSignal.sigterm, ProcessSignal.sigint]) {
+        _signals.add(
+          signal.watch().listen((_) async {
+            await _stopWhatWeStarted();
+            exit(0);
+          }),
+        );
+      }
+    }
+
     unawaited(_refresh());
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
 
@@ -174,18 +195,33 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   void dispose() {
     _poll?.cancel();
     _autoUpdateTimer?.cancel();
+    for (final signal in _signals) {
+      unawaited(signal.cancel());
+    }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  /// Closing the console stops the server it started.
+  /// The console going away stops the server it started.
   ///
   /// Leaving a child running with nothing supervising it means the next Start
-  /// finds the port taken and no way from here to see why. A service is left
-  /// alone: being left running is the entire point of having installed one.
+  /// finds the port taken and no way from here to see why. That is not
+  /// hypothetical: one was found still serving two days after its window had
+  /// gone, re-parented and answering, while a second console beside it read
+  /// zero of everything. A service is left alone: being left running is the
+  /// entire point of having installed one.
+  ///
+  /// Three roads lead here, and the third is not in this file. A window closed
+  /// is [didRequestAppExit]; a `kill` or a session ending is the signals wired
+  /// up in [initState]; a SIGKILL or a crash delivers nothing to anybody, and
+  /// for that the child watches the pid it was given — see [supervisedArgv].
+  Future<void> _stopWhatWeStarted() async {
+    if (!_server.managed) await _server.stop();
+  }
+
   @override
   Future<AppExitResponse> didRequestAppExit() async {
-    if (!_server.managed) await _server.stop();
+    await _stopWhatWeStarted();
     return AppExitResponse.exit;
   }
 
@@ -269,6 +305,18 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       if (await _server.running) {
         await _server.stop();
       } else {
+        // Asked here as well as on the unattended path, and for the reason
+        // [startRefusal] gives: `running` cannot see a server this console did
+        // not start, and starting beside one is a child that cannot bind.
+        final refusal = await startRefusal(
+          addr: _server.addr,
+          healthy: _server.healthy,
+        );
+        if (refusal != null) {
+          _fail(refusal);
+          await _refresh();
+          return;
+        }
         await _server.start();
       }
       if (mounted) setState(() => _state = _state.withError(null));

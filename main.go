@@ -27,6 +27,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Set by --supervisor-pid. Zero when nobody is supervising, which is every way
+// of starting this server but one: see supervise.go.
+var supervisorPID int
+
 // Set by --no-announce. Some networks would rather nothing multicast at all,
 // and a hosted instance has no reason to shout on the network it happens to
 // sit in.
@@ -102,6 +106,13 @@ func main() {
 			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName)
 		}
 
+		// Here rather than in main, because only the invocation that listens
+		// holds an address worth giving up: `first-device` is over in a second
+		// and has no console watching it either way.
+		if supervisorPID > 0 {
+			go superviseParent(supervisorPID)
+		}
+
 		return e.Next()
 	})
 
@@ -116,6 +127,12 @@ func main() {
 	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce",
 		settings.NoAnnounce,
 		"do not advertise this server on the local network")
+
+	// Who to stop with. A persistent flag on the root for the reason above, and
+	// passed only by a console that started this server as its own child — a
+	// unit's server is meant to outlive every window.
+	app.RootCmd.PersistentFlags().IntVar(&supervisorPID, "supervisor-pid", 0,
+		"stop when this process is gone (0: nobody is supervising)")
 
 	// What this server calls itself. Display only — the identity `/instance`
 	// answers with is generated and stored, so two servers may share a name
