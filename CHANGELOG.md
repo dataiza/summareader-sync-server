@@ -3,6 +3,29 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.8.0
+
+The server dies with the console that started it. Closing the window already
+stopped it, but only through the tidy exit — so a console that was killed,
+crashed or lost its session left a server running with nothing supervising it.
+That happened on a real machine: a window was gone and its server had been
+serving for two days, holding the port, answering, and unreachable from any
+console. There are three roads out now — the window's own exit, an interrupt
+to the console, and the server noticing for itself through `--supervisor-pid`
+— and all of them end in the shutdown that was already there, so none of them
+trades an orphan for a database cut off mid-write.
+
+A server installed as a unit is deliberately left alone. Outliving every
+window is the entire point of having installed one, and the flag is kept out
+of the unit's own command line so that stays true.
+
+And Start says why it will not. Pressing it while something else already
+answers on that address used to launch a server that could not bind and exited
+a moment later, leaving the window saying *Stopped* with no explanation. It
+asks first — the unattended start always did — and the refusal names the
+address. A half-answering address no longer hangs the button or the status
+poll either: the read that had no deadline has one.
+
 ## 0.7.0
 
 The console can keep itself up to date. A server runs on a machine nobody
