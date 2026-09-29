@@ -381,13 +381,23 @@ var lookupError = map[string]string{
 // invents, and a reworded refusal would read as the proxy's.
 func authFailed(e *core.RequestEvent, err error) error {
 	if errors.Is(err, ErrLookupFailed) {
-		// To our log, never to the caller.
-		e.App.Logger().Error("device token lookup failed", "error", err)
-		return e.JSON(http.StatusInternalServerError, lookupError)
+		return lookupFailed(e, "device token", err)
 	}
 	return e.JSON(http.StatusUnauthorized, map[string]string{
 		"error": "unknown or revoked device",
 	})
+}
+
+// lookupFailed is the one place a lookup the server could not run becomes a
+// response, wherever in a request it happened.
+//
+// Only here, and to our log: the error underneath names the collection, the
+// filter and the id it was asking for, which is the shape of our database
+// and no business of a caller. What crosses the wire is the same wording
+// whichever lookup broke, because the answer is the same either way.
+func lookupFailed(e *core.RequestEvent, what string, err error) error {
+	e.App.Logger().Error(what+" lookup failed", "error", err)
+	return e.JSON(http.StatusInternalServerError, lookupError)
 }
 
 // What a device is told when the account is at its ceiling.
@@ -424,6 +434,13 @@ func handleAppend(e *core.RequestEvent) error {
 
 	seq, err := appendEntry(e.App, accountID, deviceID, body.Payload)
 	if err != nil {
+		if errors.Is(err, ErrLookupFailed) {
+			// The quota check reads the account again, and a read that could
+			// not run is not an account that is gone. Answered as one, a
+			// database that was merely busy told a working device it was no
+			// longer paired.
+			return lookupFailed(e, "account quota", err)
+		}
 		if errors.Is(err, ErrNoAccount) {
 			return e.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "unknown account",
@@ -486,6 +503,11 @@ func handleAppendBatch(e *core.RequestEvent) error {
 				"error": "batch too large",
 				"max":   maxBatch,
 			})
+		}
+		if errors.Is(err, ErrLookupFailed) {
+			// As in the single append: a read that could not run is not an
+			// account that is gone.
+			return lookupFailed(e, "account quota", err)
 		}
 		if errors.Is(err, ErrNoAccount) {
 			return e.JSON(http.StatusUnauthorized, map[string]string{

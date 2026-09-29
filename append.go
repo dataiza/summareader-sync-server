@@ -12,16 +12,17 @@ import (
 // ErrNoAccount is returned when the token does not resolve.
 var ErrNoAccount = errors.New("unknown or revoked device")
 
-// ErrLookupFailed is returned when the token could not be checked at all: the
+// ErrLookupFailed is returned when a lookup could not be made at all: the
 // database was busy, the query timed out, the collection was not where the
-// schema says it is.
+// schema says it is. It covers the token and the account alike — what failed
+// is named where it is wrapped.
 //
 // It is deliberately not ErrNoAccount. The two used to be one error, so a
 // server that could not read its own table answered a perfectly valid device
 // with "unknown or revoked device" — and the device, having no way to tell
 // that from a revocation, asked its owner to set it up again. A fault on this
 // side of the wire is ours to report as ours.
-var ErrLookupFailed = errors.New("device lookup failed")
+var ErrLookupFailed = errors.New("lookup failed")
 
 // ErrBatchTooLarge is returned when a batch asks for more than maxBatch.
 var ErrBatchTooLarge = errors.New("batch too large")

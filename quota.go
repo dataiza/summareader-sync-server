@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -40,9 +42,28 @@ var ErrQuotaExceeded = errors.New("account is full")
 // account is a log of small deltas; if it ever measures slow, the upgrade is
 // the counter column, and then wipe and compaction have to maintain it.
 func quotaFor(app core.App, accountID string) (int64, error) {
-	account, err := app.FindRecordById(collAccounts, accountID)
+	// Resolved by hand rather than by name below, for the reason given in
+	// accountForToken: a collection that is not there answers with the same
+	// sql.ErrNoRows a record that is not there does, so a schema that failed
+	// to migrate would be indistinguishable from an account somebody deleted.
+	// The collection is held in memory, so asking for it costs no query.
+	accounts, err := app.FindCachedCollectionByNameOrId(collAccounts)
 	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrLookupFailed, err)
+	}
+
+	account, err := app.FindRecordById(accounts, accountID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// The only answer that is genuinely about the caller: the lookup ran
+		// and there is no such account.
 		return 0, ErrNoAccount
+	case err != nil:
+		// This one runs on every push, inside the append transaction. Told it
+		// was ErrNoAccount, a device pushing through a busy database was
+		// answered 401 and read a fault on this side of the wire as a pairing
+		// that had been revoked.
+		return 0, fmt.Errorf("%w: %w", ErrLookupFailed, err)
 	}
 	return int64(account.GetInt("quota_bytes")), nil
 }

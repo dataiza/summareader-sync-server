@@ -158,3 +158,43 @@ func TestQuotaSurvivesAnUpgrade(t *testing.T) {
 		t.Fatal("quota_bytes was not added to an existing collection")
 	}
 }
+
+// A quota lookup that could not run is not an account that is not there.
+//
+// checkQuota runs on every push, inside the append transaction, so this is
+// what a device is told when the database is merely busy. Flattened into
+// ErrNoAccount it reached handleAppend as a 401 — a working device told its
+// pairing was gone, over a fault on this side of the wire.
+func TestAQuotaLookupThatFailedIsNotAMissingAccount(t *testing.T) {
+	app, account := newTestApp(t)
+
+	// The fault is a schema that did not finish migrating: the collection the
+	// quota lives in is not there at all. It reports the same sql.ErrNoRows a
+	// deleted account does, which is why quotaFor resolves the collection on
+	// its own before asking for the record.
+	accounts, err := app.FindCollectionByNameOrId(collAccounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Delete(accounts); err != nil {
+		t.Fatal(err)
+	}
+
+	err = checkQuota(app, account, 10)
+	if !errors.Is(err, ErrLookupFailed) {
+		t.Fatalf("a broken quota lookup: err = %v, want ErrLookupFailed", err)
+	}
+	if errors.Is(err, ErrNoAccount) {
+		t.Fatal("a broken quota lookup still reads as an account that is gone")
+	}
+}
+
+// And the account that genuinely is not there keeps the answer it had, or the
+// split above would have turned every real refusal into a 500.
+func TestAnAccountThatIsNotThereIsStillErrNoAccount(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	if err := checkQuota(app, "nosuchaccount00", 10); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("an unknown account: err = %v, want ErrNoAccount", err)
+	}
+}
