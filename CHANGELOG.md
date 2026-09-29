@@ -3,6 +3,24 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 0.8.1
+
+A lookup that failed is no longer reported as a device the server has never
+heard of. Two places collapsed *the query could not run* into *no such token*
+and *no such account*, and both answered 401 — so a locked database, a
+statement timeout or a collection missing after a half-finished migration told
+a perfectly good device that it was not paired, and its owner to set it up
+again. Those now answer 500, which says what is true: the server failed, and
+waiting is the right thing to do.
+
+The refusals themselves are untouched, to the byte. An unknown token still
+gets `unknown or revoked device` and an unknown account still gets `unknown
+account` — the app matches on the first of those to tell a real refusal from
+one invented by a proxy in front of this server, so it must not move. A
+rejected request still writes nothing about itself either, or the column
+recording when a device was last seen would become a log of who has been
+guessing tokens.
+
 ## 0.8.0
 
 The server dies with the console that started it. Closing the window already
