@@ -3,7 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -436,5 +439,121 @@ func TestHeadFollowsTheEntriesAndNotTheCounter(t *testing.T) {
 	}
 	if seq != 6 {
 		t.Fatalf("seq after the log was emptied = %d, want 6", seq)
+	}
+}
+
+// callDevices runs one authenticated request through a real handler, the same
+// way metrics_test.go drives /metrics. /devices is the plainest of the twelve:
+// no body, no path values, nothing between the Authorization header and the
+// answer.
+func callDevices(t *testing.T, app core.App, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/devices", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	event := &core.RequestEvent{}
+	event.App = app
+	event.Request = request
+	event.Response = recorder
+	if err := handleListDevices(event); err != nil {
+		t.Fatalf("no response written: %v", err)
+	}
+	return recorder
+}
+
+// pairedDevice is a device that ought to work, so a test can show what the
+// server does to a valid one when something else is wrong.
+func pairedDevice(t *testing.T, app core.App, account, token string) *core.Record {
+	t.Helper()
+	devices, err := app.FindCollectionByNameOrId(collDevices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := core.NewRecord(devices)
+	device.Set("account", account)
+	device.Set("token", token)
+	device.Set("revoked", false)
+	if err := app.Save(device); err != nil {
+		t.Fatal(err)
+	}
+	return device
+}
+
+// The refusal a device recognises, to the byte.
+//
+// The client matches on this exact body to tell a refusal the server meant
+// from one a proxy in front of it invented. Rewording it is not a cosmetic
+// change: it makes a real refusal unreadable.
+func TestAnUnknownTokenIsStillRefusedVerbatim(t *testing.T) {
+	app, account := newTestApp(t)
+	device := pairedDevice(t, app, account, "good-token")
+
+	response := callDevices(t, app, "made-up")
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown token answered %d, want 401", response.Code)
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != `{"error":"unknown or revoked device"}` {
+		t.Fatalf("the 401 body changed: %s", body)
+	}
+	assertSilent(t, app, device.Id)
+}
+
+// A lookup that could not run is the server's fault, and a device told
+// otherwise asks its owner to pair it again over a database that was merely
+// busy.
+//
+// The fault here is a migration that did not finish: the filter names a field
+// that is no longer in the collection, so the query errors instead of matching
+// nothing. Before the split this answered 401, exactly as a wrong token did.
+func TestABrokenLookupIsAServerError(t *testing.T) {
+	app, account := newTestApp(t)
+	device := pairedDevice(t, app, account, "good-token")
+
+	// A second device, so the check that pairing works at all is not made by
+	// the device whose silence is asserted at the end — a successful request
+	// writes last_seen, which is the whole point of it.
+	pairedDevice(t, app, account, "other-token")
+	if code := callDevices(t, app, "other-token").Code; code != http.StatusOK {
+		t.Fatalf("a paired device answered %d before anything was broken", code)
+	}
+
+	devices, err := app.FindCollectionByNameOrId(collDevices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices.Fields.RemoveByName("revoked")
+	if err := app.Save(devices); err != nil {
+		t.Fatal(err)
+	}
+
+	response := callDevices(t, app, "good-token")
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("a broken lookup answered %d, want 500", response.Code)
+	}
+
+	// Nothing about the query, the token or the schema. The caller is told
+	// the server failed; the detail is in the server's log.
+	body := response.Body.String()
+	for _, leak := range []string{"good-token", "revoked", "token = {:token}", "SELECT", "devices"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("the 500 body leaked %q:\n%s", leak, body)
+		}
+	}
+
+	assertSilent(t, app, device.Id)
+}
+
+// Neither refusal may write anything, or last_seen becomes a record of who
+// has been guessing at tokens. See the comment in authenticate.
+func assertSilent(t *testing.T, app core.App, deviceID string) {
+	t.Helper()
+	record, err := app.FindRecordById(collDevices, deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen := record.GetString("last_seen"); seen != "" {
+		t.Errorf("a refused request wrote last_seen = %q", seen)
 	}
 }

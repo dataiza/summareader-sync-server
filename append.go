@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -10,6 +11,17 @@ import (
 
 // ErrNoAccount is returned when the token does not resolve.
 var ErrNoAccount = errors.New("unknown or revoked device")
+
+// ErrLookupFailed is returned when the token could not be checked at all: the
+// database was busy, the query timed out, the collection was not where the
+// schema says it is.
+//
+// It is deliberately not ErrNoAccount. The two used to be one error, so a
+// server that could not read its own table answered a perfectly valid device
+// with "unknown or revoked device" — and the device, having no way to tell
+// that from a revocation, asked its owner to set it up again. A fault on this
+// side of the wire is ours to report as ours.
+var ErrLookupFailed = errors.New("device lookup failed")
 
 // ErrBatchTooLarge is returned when a batch asks for more than maxBatch.
 var ErrBatchTooLarge = errors.New("batch too large")
@@ -280,13 +292,28 @@ func accountForToken(app core.App, token string) (string, string, error) {
 	if token == "" {
 		return "", "", ErrNoAccount
 	}
+	// Resolved by hand rather than by name below, because a collection that
+	// is not there answers with the same sql.ErrNoRows an unmatched filter
+	// does. Left to the lookup, a schema that failed to migrate would be
+	// indistinguishable from a token nobody was ever issued. The collection
+	// is held in memory, so asking for it costs no query.
+	devices, err := app.FindCachedCollectionByNameOrId(collDevices)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %w", ErrLookupFailed, err)
+	}
+
 	record, err := app.FindFirstRecordByFilter(
-		collDevices,
+		devices,
 		"token = {:token} && revoked = false",
 		dbx.Params{"token": token},
 	)
-	if err != nil || record == nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// The only answer that is genuinely about the caller: the filter ran
+		// and matched nothing.
 		return "", "", ErrNoAccount
+	case err != nil:
+		return "", "", fmt.Errorf("%w: %w", ErrLookupFailed, err)
 	}
 	return record.GetString("account"), record.Id, nil
 }

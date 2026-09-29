@@ -332,24 +332,62 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.GET("/overview", handleOverview)
 }
 
-func authenticate(e *core.RequestEvent) (accountID, deviceID string, ok bool) {
+// authenticate resolves the caller's token, or says why it could not.
+//
+// It returns an error rather than a bare false because there are two ways to
+// fail and they are not the caller's fault in equal measure: a token that
+// matches nothing is theirs, a lookup that could not run is ours. Every
+// handler wants the same pair, so the split lives here and authFailed turns
+// it into the response.
+func authenticate(e *core.RequestEvent) (accountID, deviceID string, err error) {
 	token := e.Request.Header.Get("Authorization")
 	const prefix = "Bearer "
 	if len(token) > len(prefix) && token[:len(prefix)] == prefix {
 		token = token[len(prefix):]
 	}
 
-	accountID, deviceID, err := accountForToken(e.App, token)
+	accountID, deviceID, err = accountForToken(e.App, token)
 	if err != nil {
-		return "", "", false
+		return "", "", err
 	}
 
 	// Every authenticated request, and only after the token resolved: a
 	// rejected one must leave no trace, or the column becomes a log of who has
-	// been guessing tokens. Coarse and best-effort — see seen.go.
+	// been guessing tokens. Coarse and best-effort — see seen.go. Both ways of
+	// failing above return before reaching here, so a broken lookup writes no
+	// more than a guessed token does.
 	touchDevice(e.App, deviceID, time.Now())
 
-	return accountID, deviceID, true
+	return accountID, deviceID, nil
+}
+
+// What a device is told when its token could not be checked.
+//
+// It says the server failed and stops. The error underneath names the
+// collection and the filter it was running, which is the shape of our
+// database and no business of a caller holding a token we could not read.
+// The wording is what a person can act on: waiting is the right thing to do,
+// and re-pairing — what a 401 makes a device suggest — is not.
+var lookupError = map[string]string{
+	"error": "the server could not check this device right now — it is a " +
+		"fault on the server, not a problem with this device; try again " +
+		"shortly, and tell whoever runs this server if it persists",
+}
+
+// authFailed is the one place a failed authenticate becomes a response.
+//
+// 401 keeps the wording it has always had, to the byte: a device matches on
+// it to tell a real refusal from the one a proxy in front of the server
+// invents, and a reworded refusal would read as the proxy's.
+func authFailed(e *core.RequestEvent, err error) error {
+	if errors.Is(err, ErrLookupFailed) {
+		// To our log, never to the caller.
+		e.App.Logger().Error("device token lookup failed", "error", err)
+		return e.JSON(http.StatusInternalServerError, lookupError)
+	}
+	return e.JSON(http.StatusUnauthorized, map[string]string{
+		"error": "unknown or revoked device",
+	})
 }
 
 // What a device is told when the account is at its ceiling.
@@ -372,11 +410,9 @@ type appendResponse struct {
 }
 
 func handleAppend(e *core.RequestEvent) error {
-	accountID, deviceID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, deviceID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body appendRequest
@@ -424,11 +460,9 @@ type appendBatchResponse struct {
 }
 
 func handleAppendBatch(e *core.RequestEvent) error {
-	accountID, deviceID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, deviceID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body appendBatchRequest
@@ -483,11 +517,9 @@ type readResponse struct {
 }
 
 func handleReadFrom(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	after := parseInt(e.Request.PathValue("seq"))
@@ -509,11 +541,9 @@ type blobRequest struct {
 }
 
 func handlePutBlob(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	name := e.Request.PathValue("name")
@@ -542,11 +572,9 @@ func handlePutBlob(e *core.RequestEvent) error {
 }
 
 func handleGetBlob(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	payload, err := getBlob(e.App, accountID, e.Request.PathValue("name"))
@@ -581,11 +609,9 @@ func handleGetBlob(e *core.RequestEvent) error {
 // not a fallback, it is what the first call of a sync wants — it is asking
 // where the log is, not waiting for it to move.
 func handleSubscribe(e *core.RequestEvent) error {
-	accountID, deviceID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, deviceID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	head, err := headSeq(e.App, accountID)
@@ -665,11 +691,9 @@ type wipeRequest struct {
 }
 
 func handleWipe(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body wipeRequest
@@ -829,11 +853,9 @@ type enrollRequest struct {
 }
 
 func handleEnroll(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body enrollRequest
@@ -866,11 +888,9 @@ type joinVerifierRequest struct {
 }
 
 func handleSetJoinVerifier(e *core.RequestEvent) error {
-	accountID, _, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, _, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body joinVerifierRequest
@@ -1076,11 +1096,9 @@ func handleOperatorEnroll(e *core.RequestEvent) error {
 }
 
 func handleListDevices(e *core.RequestEvent) error {
-	accountID, callerID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, callerID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 	devices, err := listDevices(e.App, accountID)
 	if err != nil {
@@ -1113,11 +1131,9 @@ type renameRequest struct {
 // It renames the caller, always. There is no device id in the body, so a
 // stolen token can rename the device it was stolen from and nothing else.
 func handleRename(e *core.RequestEvent) error {
-	accountID, callerID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, callerID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body renameRequest
@@ -1156,11 +1172,9 @@ type revokeRequest struct {
 }
 
 func handleRevoke(e *core.RequestEvent) error {
-	accountID, callerID, ok := authenticate(e)
-	if !ok {
-		return e.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "unknown or revoked device",
-		})
+	accountID, callerID, err := authenticate(e)
+	if err != nil {
+		return authFailed(e, err)
 	}
 
 	var body revokeRequest
