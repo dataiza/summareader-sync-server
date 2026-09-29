@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -555,5 +556,138 @@ func assertSilent(t *testing.T, app core.App, deviceID string) {
 	}
 	if seen := record.GetString("last_seen"); seen != "" {
 		t.Errorf("a refused request wrote last_seen = %q", seen)
+	}
+}
+
+// callAppend pushes one entry through the real handler, the way callDevices
+// drives /devices.
+func callAppend(t *testing.T, app core.App, token, payload string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := strings.NewReader(fmt.Sprintf(`{"payload":%q}`, payload))
+	request := httptest.NewRequest(http.MethodPost, "/append", body)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	event := &core.RequestEvent{}
+	event.App = app
+	event.Request = request
+	event.Response = recorder
+	if err := handleAppend(event); err != nil {
+		t.Fatalf("no response written: %v", err)
+	}
+	return recorder
+}
+
+// busyAfterOneRead is a database that answers the first read of an account
+// and fails the next one.
+//
+// It has to be faked, because the append reads the account itself before the
+// quota check reads it again: any fault a test can arrange in the schema is
+// caught by that first read and never reaches quotaFor. The fault that does
+// reach it is the transient one — a busy database, a statement that timed
+// out, a connection that went away mid-transaction — which is to say the one
+// that strikes between two reads of the same row. Faking it is the only way
+// to have it happen on demand.
+type busyAfterOneRead struct {
+	core.App
+	reads *int
+}
+
+func (b busyAfterOneRead) FindRecordById(collection any, id string, filters ...func(*dbx.SelectQuery) error) (*core.Record, error) {
+	// By name before the fix and by model after it, so the count is of reads
+	// of the account either way.
+	name, _ := collection.(string)
+	if model, ok := collection.(*core.Collection); ok {
+		name = model.Name
+	}
+	if name == collAccounts {
+		*b.reads++
+		if *b.reads > 1 {
+			return nil, errors.New("database is locked")
+		}
+	}
+	return b.App.FindRecordById(collection, id, filters...)
+}
+
+// The append does its reads on the transaction's app, so the fault has to
+// survive into it.
+func (b busyAfterOneRead) RunInTransaction(fn func(core.App) error) error {
+	return b.App.RunInTransaction(func(tx core.App) error {
+		return fn(busyAfterOneRead{App: tx, reads: b.reads})
+	})
+}
+
+// The push path, where this matters most: a device syncing is told the
+// server broke, not that it is no longer paired.
+func TestAQuotaLookupThatFailedDuringAnAppendIsAServerError(t *testing.T) {
+	app, account := newTestApp(t)
+	pairedDevice(t, app, account, "good-token")
+
+	if code := callAppend(t, app, "good-token", "first").Code; code != http.StatusOK {
+		t.Fatalf("a plain append answered %d before anything was broken", code)
+	}
+
+	reads := 0
+	response := callAppend(t, busyAfterOneRead{App: app, reads: &reads}, "good-token", "second")
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("a quota lookup that could not run answered %d, want 500", response.Code)
+	}
+
+	// Nothing about the account, the collection or the query. The caller is
+	// told the server failed; the detail is in the server's log.
+	body := response.Body.String()
+	for _, leak := range []string{account, collAccounts, "SELECT", "quota_bytes", "locked"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("the 500 body leaked %q:\n%s", leak, body)
+		}
+	}
+
+	// And the transaction rolled back whole. A half-written append is worse
+	// than a refused one: the counter would have moved without an entry
+	// behind it, and every reader would wait for a sequence number that is
+	// never coming.
+	entries, err := readFrom(app, account, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries after a failed append = %d, want 1", len(entries))
+	}
+	record, err := app.FindRecordById(collAccounts, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq := record.GetInt("seq"); seq != 1 {
+		t.Fatalf("the counter after a failed append = %d, want 1", seq)
+	}
+}
+
+// The other half: an account that really is gone answers exactly as it did.
+//
+// Which is not the 401 the handler's ErrNoAccount branch suggests — the
+// append reads the account before the quota check does, and that read wraps
+// its error rather than flattening it, so a deleted account has always come
+// out of the generic branch below it. Pinned here because the fix must not
+// move it.
+func TestAnAccountThatIsGoneAnswersAsItAlwaysHas(t *testing.T) {
+	app, account := newTestApp(t)
+	pairedDevice(t, app, account, "good-token")
+
+	record, err := app.FindRecordById(collAccounts, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Delete(record); err != nil {
+		t.Fatal(err)
+	}
+
+	response := callAppend(t, app, "good-token", "into the void")
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("an account that is gone answered %d", response.Code)
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != `{"error":"append failed"}` {
+		t.Fatalf("the body for an account that is gone changed: %s", body)
 	}
 }
