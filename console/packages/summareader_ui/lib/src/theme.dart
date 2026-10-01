@@ -196,6 +196,28 @@ class Ar {
   static const heading = 'Caprasimo';
   static const body = 'Figtree';
 
+  /// The text face every style below draws in, or null for the platform's.
+  ///
+  /// A settable value for the same reason [_palette] is one: the styles are
+  /// static and read in places that have no BuildContext, and threading a
+  /// family through several hundred call sites to change one would be a
+  /// refactor pretending to be a feature. [useBodyFace] is called before the
+  /// first frame and again whenever the choice changes.
+  ///
+  /// Null is how Flutter says "whatever the platform reads in", and that is
+  /// the whole of the other choice: nothing further is bundled. A reader who
+  /// finds Figtree hard going is asking for the face their device already
+  /// reads in, not for a third one at a megabyte in every build.
+  ///
+  /// The display face is not part of this. Caprasimo is the wordmark, and
+  /// [headingStyle] already has a rule for the headings it cannot draw.
+  static String? _bodyFace = body;
+
+  static String? get bodyFace => _bodyFace;
+
+  static void useBodyFace({required bool system}) =>
+      _bodyFace = system ? null : body;
+
   /// The three elevations, tuned against the light ground.
   static List<BoxShadow> get shadowSm => [
         BoxShadow(
@@ -268,7 +290,7 @@ class Ar {
   static TextStyle headingStyle(double size, {String? forText}) {
     final display = forText == null || displayCanRender(forText);
     return TextStyle(
-      fontFamily: display ? heading : body,
+      fontFamily: display ? heading : _bodyFace,
       // The text face has to work harder to read as a heading: the display
       // one is heavy by design and Figtree at 400 would read as body copy.
       fontWeight: display ? FontWeight.w400 : FontWeight.w800,
@@ -278,8 +300,10 @@ class Ar {
       color: text,
       // For the call sites that cannot say what the words are. Mixed faces
       // still, but the app's own text face rather than whatever the platform
-      // reaches for.
-      fontFamilyFallback: const [body],
+      // reaches for — unless the platform's is the face that was asked for,
+      // and then naming Figtree here would overrule the setting on exactly
+      // the words it was chosen for.
+      fontFamilyFallback: _bodyFace == null ? null : [_bodyFace!],
     );
   }
 
@@ -290,7 +314,7 @@ class Ar {
     double? height,
   }) =>
       TextStyle(
-        fontFamily: body,
+        fontFamily: _bodyFace,
         fontSize: size,
         fontWeight: weight,
         height: height,
@@ -299,7 +323,7 @@ class Ar {
 
   /// The uppercase section label used above every group.
   static TextStyle get eyebrow => TextStyle(
-        fontFamily: body,
+        fontFamily: _bodyFace,
         fontSize: 11,
         letterSpacing: 0.09 * 11,
         color: accent700,
@@ -311,7 +335,7 @@ class Ar {
     use(brightness);
     return ThemeData(
       useMaterial3: true,
-      fontFamily: body,
+      fontFamily: _bodyFace,
       scaffoldBackgroundColor: bg,
       colorScheme: ColorScheme.fromSeed(
         seedColor: accent,
@@ -323,7 +347,7 @@ class Ar {
       textTheme: const TextTheme().apply(
         bodyColor: text,
         displayColor: text,
-        fontFamily: body,
+        fontFamily: _bodyFace,
       ),
       splashFactory: NoSplash.splashFactory,
       // The prototype has no ripples; feedback is colour change on hover.
