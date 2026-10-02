@@ -29,6 +29,17 @@ void main() {
   testWidgets('the documented window is what the console draws', (
     tester,
   ) async {
+    // On a desktop, and said rather than left to `flutter test`, which
+    // reports Android on every machine. The look puts a 48-point floor under
+    // every tap target on a touch platform, so without this the file in docs/
+    // would document a phone-sized layout of a program that only ever ships
+    // as a desktop window.
+    //
+    // One of the three it is built for rather than all three: they render this
+    // window to the same pixels, and the comment above already says this
+    // picture belongs to the machine that took it, so running it three times
+    // would be the same disagreement reported three times.
+    //
     // A small real install: one library, three devices that have been in use
     // for a while, and the server up — which is the only state in which the
     // dashboard button is worth showing, since that is when it is live. Three
@@ -80,23 +91,34 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
+    // The boundary the picture is taken at, named rather than inferred.
+    // `matchesGoldenFile` photographs the nearest repaint boundary above
+    // whatever it is given, and which widget that turns out to be depends on
+    // the platform: a desktop scroll view carries a Scrollbar, which is one,
+    // and a touch one carries an overscroll stretch, which is not. Handed the
+    // view itself the camera therefore framed the content alone on a desktop —
+    // 680 tall and transparent behind it — and the whole window on a phone.
+    // This says the window, on both.
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: Ar.themeData(),
-        home: Scaffold(
-          backgroundColor: Ar.bg,
-          body: ConsoleView(state: state),
+        home: RepaintBoundary(
+          key: const ValueKey('window'),
+          child: Scaffold(
+            backgroundColor: Ar.bg,
+            body: ConsoleView(state: state),
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
     await expectLater(
-      find.byType(ConsoleView),
+      find.byKey(const ValueKey('window')),
       matchesGoldenFile('../../docs/desktop-window.png'),
     );
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 }
 
 /// The two faces the look is drawn in, loaded by hand.

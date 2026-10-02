@@ -1,6 +1,31 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'theme.dart';
+
+/// Whether a finger is what presses this, rather than a pointer.
+///
+/// The rule behind every tap target's floor, said once because two of them ask
+/// it: [Hoverable] and, in the app, the controls built from a Material menu.
+///
+/// The platform rather than the window's width, which was the earlier proxy
+/// and could not tell a tablet from a desktop, or a phone turned sideways from
+/// either — all three are wider than [narrowWindow] and only one of them has a
+/// mouse.
+///
+/// `defaultTargetPlatform` rather than `Platform` from `dart:io`: this package
+/// has to keep building for the web, where that library does not exist, and
+/// this one also answers correctly on an iPad and can be moved by a test
+/// through `debugDefaultTargetPlatformOverride`.
+///
+/// ⛔ It is not a complete test, and it does not pretend to be. A touchscreen
+/// Windows or Linux laptop gets the drawn size, because nothing here
+/// distinguishes it from a desktop with a mouse and Flutter offers no signal
+/// that says a display is a touch display. A reader on one of those is worse
+/// off than a reader on a tablet, knowingly.
+bool get touchDevice =>
+    defaultTargetPlatform == TargetPlatform.android ||
+    defaultTargetPlatform == TargetPlatform.iOS;
 
 /// A widget that changes appearance on hover, which is how the prototype gives
 /// feedback — it has no ripples.
@@ -32,19 +57,16 @@ class Hoverable extends StatefulWidget {
 class _HoverableState extends State<Hoverable> {
   bool _hovered = false;
 
-  /// Big enough to hit with a thumb, on the windows where a thumb is what is
+  /// Big enough to hit with a thumb, on the devices where a thumb is what is
   /// being used.
   ///
   /// A pointer is precise and a fingertip is about nine millimetres across,
-  /// so 48 logical pixels is the floor on a phone and pointless bloat on a
-  /// desktop, where these same controls sit at 26 to 38 and are perfectly
-  /// usable with a mouse. Decided by window width rather than by platform: a
-  /// small window on a touchscreen laptop has the same problem, and a
-  /// phone-sized desktop window is not worth a second rule.
-  Widget _sized(BuildContext context, Widget child) {
-    if (widget.onTap == null) return child;
-    final width = MediaQuery.maybeSizeOf(context)?.width;
-    if (width == null || width >= narrowWindow) return child;
+  /// so 48 logical pixels is the floor on a phone or a tablet and pointless
+  /// bloat on a desktop, where these same controls sit at 26 to 38 and are
+  /// perfectly usable with a mouse. See [touchDevice] for which of the two a
+  /// machine counts as, and for what that test still gets wrong.
+  Widget _sized(Widget child) {
+    if (widget.onTap == null || !touchDevice) return child;
 
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -88,17 +110,13 @@ class _HoverableState extends State<Hoverable> {
           child: GestureDetector(
             onTap: widget.onTap,
             behavior: HitTestBehavior.opaque,
-            child: _unselectable(
-              _sized(context, widget.builder(context, _hovered)),
-            ),
+            child: _unselectable(_sized(widget.builder(context, _hovered))),
           ),
         ),
         null => GestureDetector(
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
-          child: _unselectable(
-            _sized(context, widget.builder(context, _hovered)),
-          ),
+          child: _unselectable(_sized(widget.builder(context, _hovered))),
         ),
       },
     );

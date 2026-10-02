@@ -29,6 +29,15 @@ void main() {
     for (final entry in upstream.listSync(recursive: true)) {
       if (entry is! File) continue;
       final relative = entry.path.substring(upstream.path.length + 1);
+      // Minus what `pub get` leaves behind. Resolving that package in the app's
+      // own checkout writes a .dart_tool and a pubspec.lock inside it, and
+      // they are that checkout's answer about its own dependencies rather than
+      // part of the look — scripts/sync-ui.sh copies lib and the pubspec and
+      // nothing else, so asking for them would be asking for files it has no
+      // business producing.
+      if (relative.startsWith('.dart_tool/') || relative == 'pubspec.lock') {
+        continue;
+      }
       final here = File('packages/summareader_ui/$relative');
       if (!here.existsSync()) {
         differences.add('$relative is missing here');
