@@ -547,7 +547,6 @@ void main() {
       expect(after['autoUpdate'], isTrue);
     });
   });
-
 }
 
 /// What the window is drawing right now.
