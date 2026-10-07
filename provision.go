@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,34 @@ func newToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// hashToken is what the devices collection holds in place of a token. Card
+// 714.
+//
+// Plain SHA-256 and no slow KDF: a slow hash exists to protect secrets people
+// chose, and these are 256 random bits nobody chose, which no amount of
+// hashing speed makes guessable. Hex, so the stored form is visibly not the
+// base64 a device holds.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// looksHashed says whether a stored value is already a hash: 64 lowercase hex
+// characters. A token as newToken issues it is 43 characters of base64, so it
+// can never pass for one, and that is what makes the boot rehash safe to run
+// on every start.
+func looksHashed(stored string) bool {
+	if len(stored) != sha256.Size*2 {
+		return false
+	}
+	for _, c := range stored {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // Device is what provisioning hands back.
@@ -70,7 +99,7 @@ func createAccount(app core.App, label, deviceLabel string) (*Device, error) {
 		}
 		record := core.NewRecord(devices)
 		record.Set("account", account.Id)
-		record.Set("token", token)
+		record.Set("token", hashToken(token))
 		record.Set("label", deviceLabel)
 		record.Set("revoked", false)
 		if err := tx.Save(record); err != nil {
@@ -183,7 +212,7 @@ func enrollDevice(app core.App, accountID, label string) (*Device, error) {
 
 	record := core.NewRecord(devices)
 	record.Set("account", accountID)
-	record.Set("token", token)
+	record.Set("token", hashToken(token))
 	record.Set("label", label)
 	record.Set("revoked", false)
 	if err := app.Save(record); err != nil {

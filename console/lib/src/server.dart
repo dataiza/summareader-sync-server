@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'addresses.dart';
 import 'service.dart';
@@ -88,14 +87,6 @@ String? serverBinary() {
   return null;
 }
 
-/// An opaque bearer token, from the platform's own source of randomness.
-String newToken() {
-  final random = Random.secure();
-  return base64Url
-      .encode(List<int>.generate(32, (_) => random.nextInt(256)))
-      .replaceAll('=', '');
-}
-
 /// The server the console supervises, as a child process — or, when a unit is
 /// installed, as something systemd owns and this only asks about.
 ///
@@ -108,7 +99,7 @@ class SyncServer {
   SyncServer({
     required this.exe,
     required this.dir,
-    required this.token,
+    required this.tokens,
     required this.addr,
     bool Function()? managedBy,
   }) : _managedBy = managedBy ?? serviceInstalled;
@@ -116,7 +107,7 @@ class SyncServer {
   /// Null when no server binary could be found on this machine.
   final String? exe;
   final String dir;
-  final String token;
+  final Tokens tokens;
 
   /// The address the server binds to. It moves while the console is open —
   /// changing it is a stop, a rebind and a start, because a listening socket
@@ -166,22 +157,15 @@ class SyncServer {
     // The console's own pid goes with it, so the child can end itself if this
     // window is killed outright rather than closed. See [supervisedArgv].
     final argv = supervisedArgv(binary, addr, dir, pid);
-    // A token minted per window and written nowhere is what switches the
-    // metrics endpoints on. The status pane reads those rather than opening
-    // the database beside the server: the counts already exist over HTTP, and
-    // a second writer on one SQLite file does not.
+    // The metrics token is what switches the metrics endpoints on. The status
+    // pane reads those rather than opening the database beside the server:
+    // the counts already exist over HTTP, and a second writer on one SQLite
+    // file does not. The operator token is a separate value, so that one
+    // handed to a scraper cannot enrol a device — see [Tokens].
     final child = await Process.start(
       argv.first,
       argv.skip(1).toList(),
-      environment: {
-        'SUMMAREADER_METRICS_TOKEN': token,
-        // The same value under both names. They are separate credentials so
-        // that a *scraper* can be given the read-only one — the console is
-        // the operator and holds both by definition, and a second random
-        // string here would be one more thing to keep in step for no boundary
-        // that anybody stands on.
-        'SUMMAREADER_OPERATOR_TOKEN': token,
-      },
+      environment: tokens.environment,
       mode: ProcessStartMode.inheritStdio,
     );
     _child = child;
@@ -228,7 +212,7 @@ class SyncServer {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
       final request = await client.getUrl(Uri.parse('http://$addr$path'));
-      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.set('Authorization', 'Bearer ${tokens.metrics}');
       final response = await request.close().timeout(
         const Duration(seconds: 2),
       );
@@ -295,7 +279,7 @@ class SyncServer {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
       final request = await client.postUrl(Uri.parse('http://$addr$path'));
-      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.set('Authorization', 'Bearer ${tokens.operator}');
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
       final response = await request.close().timeout(
@@ -316,7 +300,7 @@ class SyncServer {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
     try {
       final request = await client.postUrl(Uri.parse('http://$addr$path'));
-      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.set('Authorization', 'Bearer ${tokens.operator}');
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
       final response = await request.close().timeout(
@@ -358,8 +342,9 @@ class SyncServer {
 /// a start that quietly did nothing is indistinguishable from a server that
 /// failed to bind, and this is the start nobody was watching.
 ///
-/// The metrics token is deliberately not in the list. It is minted per window
-/// rather than read from anywhere, so it cannot be the thing that is missing.
+/// The tokens are deliberately not in the list. Each is read from the config
+/// file or the unit, or minted when neither has one, so neither can be the
+/// thing that is missing.
 String? autostartRefusal({
   required String? exe,
   required String dir,

@@ -20,7 +20,7 @@ func TestOverviewCountsAndLists(t *testing.T) {
 	add := func(label string, revoked bool) string {
 		record := core.NewRecord(devices)
 		record.Set("account", account)
-		record.Set("token", "token-"+label)
+		record.Set("token", hashToken("token-"+label))
 		record.Set("label", label)
 		record.Set("revoked", revoked)
 		if err := app.Save(record); err != nil {

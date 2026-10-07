@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'addresses.dart';
 
@@ -42,6 +44,75 @@ List<String> supervisedArgv(String exe, String addr, String dir, int pid) => [
   '--supervisor-pid=$pid',
 ];
 
+/// An opaque bearer token, from the platform's own source of randomness.
+String newToken() {
+  final random = Random.secure();
+  return base64Url
+      .encode(List<int>.generate(32, (_) => random.nextInt(256)))
+      .replaceAll('=', '');
+}
+
+const metricsEnv = 'SUMMAREADER_METRICS_TOKEN';
+const operatorEnv = 'SUMMAREADER_OPERATOR_TOKEN';
+
+/// The two credentials the console holds for the server it runs. Card 716.
+///
+/// Two, and independent. The metrics one opens /metrics and /overview, which
+/// are read-only, and is the one a scraper may be handed; the operator one
+/// enrols, stops and removes devices. Until 716 the console gave both names one
+/// value and wrote it into a unit anybody on the machine could read, so a
+/// scraper set up from that file could also enrol devices.
+class Tokens {
+  const Tokens({
+    required this.metrics,
+    required this.operator,
+    this.fromConfig = const {},
+  });
+
+  final String metrics;
+  final String operator;
+
+  /// The environment names whose value the config file already gives.
+  final Set<String> fromConfig;
+
+  /// What the server is started with: each token the config file does not
+  /// already name.
+  ///
+  /// The server reads the environment before the file, so passing one the file
+  /// also names would quietly replace the operator's own setting with the
+  /// console's.
+  Map<String, String> get environment => {
+    if (metrics.isNotEmpty && !fromConfig.contains(metricsEnv))
+      metricsEnv: metrics,
+    if (operator.isNotEmpty && !fromConfig.contains(operatorEnv))
+      operatorEnv: operator,
+  };
+}
+
+/// Where each token comes from: the config file the server will read, then the
+/// installed unit, then a fresh one.
+///
+/// The file first, because a `metrics_token` an operator wrote there is the one
+/// their scraper already holds. The unit next, because a console opened beside
+/// a running service has to hold what that server holds — minting afresh would
+/// leave the pane reporting zero devices against a server full of them.
+Tokens resolveTokens(Map<String, dynamic> config, String unit) {
+  final fromConfig = <String>{};
+  String pick(String key, String env) {
+    final set = config[key];
+    if (set is String && set.trim().isNotEmpty) {
+      fromConfig.add(env);
+      return set.trim();
+    }
+    final installed = unitEnv(unit, env);
+    return installed.isNotEmpty ? installed : newToken();
+  }
+
+  final metrics = pick('metrics_token', metricsEnv);
+  final operator = pick('operator_token', operatorEnv);
+  return Tokens(metrics: metrics, operator: operator, fromConfig: fromConfig);
+}
+
 /// Everything that differs between one installation and the next. A null
 /// [compose] means the unit runs the binary directly.
 class ServiceConfig {
@@ -49,7 +120,7 @@ class ServiceConfig {
     required this.exe,
     required this.addr,
     required this.dir,
-    required this.token,
+    required this.tokens,
     this.compose,
     this.uid = 0,
     this.gid = 0,
@@ -58,7 +129,7 @@ class ServiceConfig {
   final String exe;
   final String addr;
   final String dir;
-  final String token;
+  final Tokens tokens;
   final String? compose;
   final int uid;
   final int gid;
@@ -84,12 +155,12 @@ String renderUnit(ServiceConfig c) {
   b.writeln();
 
   b.writeln('[Service]');
-  if (c.token.isNotEmpty) {
-    b.writeln('Environment="SUMMAREADER_METRICS_TOKEN=${c.token}"');
-    // Both names, one value — see the note in server.dart. The unit is the
-    // console's own server, so the console is the operator of it.
-    b.writeln('Environment="SUMMAREADER_OPERATOR_TOKEN=${c.token}"');
-  }
+  // The same environment a child of the console is started with — see
+  // [Tokens.environment]. Secrets in a unit, which is why [installService]
+  // writes it readable by its owner alone.
+  c.tokens.environment.forEach((name, value) {
+    b.writeln('Environment="$name=$value"');
+  });
 
   final compose = c.compose;
   if (compose == null) {
@@ -151,7 +222,8 @@ bool serviceInstalled([String? configHome]) =>
     (Platform.isLinux || configHome != null) &&
     File(unitPath(configHome)).existsSync();
 
-String _unit() {
+/// The installed unit's text, or empty when there is none.
+String installedUnit() {
   try {
     return File(unitPath()).readAsStringSync();
   } on FileSystemException {
@@ -179,14 +251,6 @@ String unitEnv(String unit, String name) {
   return '';
 }
 
-/// The token the unit was installed with, so a console opened later can still
-/// read the counts out of a server it did not start.
-///
-/// Minting a fresh one per window instead would leave the pane reporting zero
-/// devices against a server full of them, which reads exactly like a server
-/// nobody has paired with.
-String serviceMetricsToken() => unitEnv(_unit(), 'SUMMAREADER_METRICS_TOKEN');
-
 /// The address the installed unit serves on, so the console opens showing
 /// where the server actually is rather than its own default.
 String serviceBindIn(String unit) {
@@ -200,11 +264,11 @@ String serviceBindIn(String unit) {
   return '$host:${port.isEmpty ? '8099' : port}';
 }
 
-String serviceBind() => serviceBindIn(_unit());
+String serviceBind() => serviceBindIn(installedUnit());
 
 /// Which of the two the installed unit runs, so the console reopens on the
 /// choice that was made rather than on the default.
-bool serviceDocker() => _unit().contains('ExecStart=docker compose');
+bool serviceDocker() => installedUnit().contains('ExecStart=docker compose');
 
 /// Writes the unit and enables it. Writing over an existing one is the update
 /// path: the bind address changed in the console has to reach the unit too, or
@@ -212,9 +276,33 @@ bool serviceDocker() => _unit().contains('ExecStart=docker compose');
 Future<void> installService(ServiceConfig config) async {
   final path = File(unitPath());
   await path.parent.create(recursive: true);
-  await path.writeAsString(renderUnit(config));
+  await writePrivate(path, renderUnit(config));
   await systemctl(['daemon-reload']);
   await systemctl(['enable', '--now', unitName]);
+}
+
+/// Writes [text] to [file], readable and writable by its owner alone. Card 716.
+///
+/// The unit carries both tokens, and ~/.config is readable by everyone on
+/// plenty of machines. Dart has no chmod, so the file is created empty,
+/// narrowed, and only then given its contents: at no moment is it readable by
+/// anybody else with a token in it. Written beside and renamed over, so a unit
+/// an older console left at 0644 is replaced rather than rewritten in place.
+Future<void> writePrivate(File file, String text) async {
+  final tmp = File('${file.path}.tmp');
+  await tmp.writeAsString('');
+  await narrow(tmp.path);
+  await tmp.writeAsString(text);
+  await tmp.rename(file.path);
+}
+
+/// chmod 600, and a refusal rather than a shrug when it fails: a unit that is
+/// still readable by everybody is the thing this exists to prevent.
+Future<void> narrow(String path) async {
+  final result = await Process.run('chmod', ['600', path]);
+  if (result.exitCode != 0) {
+    throw Exception('chmod 600 $path: ${'${result.stderr}'.trim()}');
+  }
 }
 
 Future<void> uninstallService() async {

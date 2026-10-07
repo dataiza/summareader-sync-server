@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -600,5 +601,104 @@ func TestLegacyDuplicatesStillSave(t *testing.T) {
 	// And the schema still comes up clean over them.
 	if err := ensureSchema(app); err != nil {
 		t.Fatalf("ensureSchema over duplicate labels: %v", err)
+	}
+}
+
+// Card 714: the database holds what a token hashes to, never the token, so a
+// backup of it or an administrator's session hands over no credentials.
+func TestTheTokenIsStoredHashed(t *testing.T) {
+	app, _ := newTestApp(t)
+
+	first, err := createAccount(app, "My library", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := enrollDevice(app, first.AccountID, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, device := range []*Device{first, second} {
+		record, err := app.FindRecordById(collDevices, device.DeviceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored := record.GetString("token")
+		if stored == device.Token {
+			t.Fatal("the token is stored as it was issued")
+		}
+		sum := sha256.Sum256([]byte(device.Token))
+		if stored != hex.EncodeToString(sum[:]) {
+			t.Fatalf("stored %q, which is not the token's SHA-256", stored)
+		}
+		if _, _, err := accountForToken(app, device.Token); err != nil {
+			t.Fatalf("an issued token does not authenticate: %v", err)
+		}
+		// The hash is not a credential in its own right.
+		if _, _, err := accountForToken(app, stored); err == nil {
+			t.Fatal("the stored hash authenticates as if it were the token")
+		}
+	}
+}
+
+// A database written before 714 holds tokens as issued. The devices holding
+// them must keep syncing across the upgrade, with nothing to do on either end.
+func TestAPreUpgradeDatabaseStillAuthenticates(t *testing.T) {
+	app, account := newTestApp(t)
+
+	devices, err := app.FindCollectionByNameOrId(collDevices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := newToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := core.NewRecord(devices)
+	old.Set("account", account)
+	old.Set("token", token)
+	old.Set("label", "From before")
+	old.Set("revoked", false)
+	if err := app.Save(old); err != nil {
+		t.Fatal(err)
+	}
+
+	// The boot after the upgrade, and the one after that.
+	for boot := 1; boot <= 2; boot++ {
+		if err := ensureSchema(app); err != nil {
+			t.Fatalf("boot %d: %v", boot, err)
+		}
+		record, err := app.FindRecordById(collDevices, old.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256([]byte(token))
+		if got := record.GetString("token"); got != hex.EncodeToString(sum[:]) {
+			t.Fatalf("boot %d left %q, want the token's hash, once", boot, got)
+		}
+		gotAccount, gotDevice, err := accountForToken(app, token)
+		if err != nil {
+			t.Fatalf("boot %d: a pre-upgrade token no longer authenticates: %v", boot, err)
+		}
+		if gotAccount != account || gotDevice != old.Id {
+			t.Fatalf("boot %d: resolved to the wrong device", boot)
+		}
+	}
+}
+
+// What makes the boot rehash safe to repeat: a token as issued can never look
+// like a hash, so nothing is ever hashed twice.
+func TestAnIssuedTokenNeverLooksHashed(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		token, err := newToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if looksHashed(token) {
+			t.Fatalf("%q reads as a hash", token)
+		}
+		if !looksHashed(hashToken(token)) {
+			t.Fatal("a hash does not read as one")
+		}
 	}
 }

@@ -156,6 +156,16 @@ func main() {
 		os.Args = append(os.Args, "--http="+settings.HTTP)
 	}
 
+	// No web page may call this server, unless --origins says which may. Card
+	// 712. PocketBase reads an empty --origins as "*", so the default has to
+	// be a value no browser ever sends as an origin rather than no value at
+	// all. Nothing that talks to this server is a web page — the app and the
+	// console both speak HTTP directly and never ask about CORS — so the only
+	// pages a wildcard served were somebody else's.
+	if isServe(os.Args) && !hasArg(os.Args, "--origins") {
+		os.Args = append(os.Args, "--origins=none")
+	}
+
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 		os.Exit(1)
@@ -275,6 +285,11 @@ func xdgDataHome() string {
 // the client needs beyond these five, it computes locally from what it has
 // already decrypted.
 func registerRoutes(e *core.ServeEvent) {
+	// Not one of ours: PocketBase's own routes, kept to this machine. See
+	// lockdown.go. None of the routes below live under /api/ or /_/, so none
+	// of them is affected.
+	bindLocalOnly(e)
+
 	e.Router.POST("/append", handleAppend)
 	// The same operation, many at a time. A first sync is thousands of
 	// records and one POST each was the whole of its cost: the work per
@@ -849,8 +864,10 @@ func registerCommands(app *pocketbase.PocketBase) {
 			cmd.Println("──────────────────────────────────────────────")
 			cmd.Println()
 			cmd.Println("Paste the token into SummaReader on this device.")
+			// True since card 714: the devices collection holds the token's
+			// hash, so not even this server can show it again.
 			cmd.Println("It is shown once and is not recoverable — the server")
-			cmd.Println("keeps it only to compare against.")
+			cmd.Println("keeps only a hash of it, to compare against.")
 			cmd.Println()
 			cmd.Println("This is only for the first device. Every one after")
 			cmd.Println("it takes a code from an app that is already set up —")

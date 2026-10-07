@@ -305,8 +305,9 @@ func accountForToken(app core.App, token string) (string, string, error) {
 
 	record, err := app.FindFirstRecordByFilter(
 		devices,
+		// By the hash, which is all the collection holds — see hashToken.
 		"token = {:token} && revoked = false",
-		dbx.Params{"token": token},
+		dbx.Params{"token": hashToken(token)},
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

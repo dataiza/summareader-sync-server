@@ -31,6 +31,13 @@ on:
 # Deliberately no `concurrency` group: a release build must never be cancelled
 # by whatever is pushed next.
 
+# **Every action is pinned to a commit**, with its version beside it (card 718).
+# These jobs can write releases, and a tag is a pointer its owner can move: a
+# moved `v2` would run somebody else's code with that permission on the next
+# tag pushed here. Updating one is changing the SHA and the comment together.
+# Checkouts keep no credentials behind — nothing here pushes with git, and the
+# `gh` steps carry their own token — so no later step can find one in .git.
+
 jobs:
   # Everything that can be wrong before a single byte is compiled: the tag
   # against version.go and the changelog section the notes are read from.
@@ -44,7 +51,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: The version, and the tag that must match it
         id: version
@@ -124,9 +133,11 @@ jobs:
       contents: write
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
           cache-dependency-path: go.sum
@@ -165,14 +176,16 @@ jobs:
           - os: linux
             runner: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
           cache-dependency-path: go.sum
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           flutter-version: '3.47.0'
           channel: stable

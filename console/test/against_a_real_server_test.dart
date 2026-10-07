@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:summareader_sync_console/src/server.dart';
+import 'package:summareader_sync_console/src/service.dart';
 
 /// The one test that runs a server.
 ///
@@ -38,7 +39,10 @@ void main() {
     final server = SyncServer(
       exe: exe,
       dir: dir.path,
-      token: 'a-token-nothing-else-knows',
+      tokens: const Tokens(
+        metrics: 'a-token-nothing-else-knows',
+        operator: 'and-another-nobody-knows',
+      ),
       // A port unlikely to be the one a developer has a real server on.
       addr: '127.0.0.1:8123',
       // Never systemd here: this test owns the process it started, and a unit
@@ -69,6 +73,21 @@ void main() {
       (after['devices'] as List<dynamic>).first,
       containsPair('account', device.accountId),
     );
+
+    // 716: the operator controls answer the operator token, and the metrics
+    // token — the one a scraper may be given — is refused them.
+    expect(await server.rename(device.deviceId, 'Renamed'), isNull);
+    final scraper = SyncServer(
+      exe: exe,
+      dir: dir.path,
+      tokens: const Tokens(
+        metrics: 'a-token-nothing-else-knows',
+        operator: 'a-token-nothing-else-knows',
+      ),
+      addr: '127.0.0.1:8123',
+      managedBy: () => false,
+    );
+    expect(await scraper.rename(device.deviceId, 'Hijacked'), isNotNull);
   }, timeout: const Timeout(Duration(minutes: 2)));
 }
 

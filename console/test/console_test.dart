@@ -35,7 +35,7 @@ void main() {
       exe: '/home/you/.local/bin/summareader-sync',
       addr: '10.10.20.1:8099',
       dir: '/home/you/pb_data',
-      token: 'sesame',
+      tokens: Tokens(metrics: 'sesame', operator: 'open'),
     );
     final unit = renderUnit(config);
 
@@ -52,6 +52,7 @@ void main() {
       'ExecStart=/home/you/.local/bin/summareader-sync serve '
           '--http=10.10.20.1:8099 --dir=/home/you/pb_data',
       'Environment="SUMMAREADER_METRICS_TOKEN=sesame"',
+      'Environment="SUMMAREADER_OPERATOR_TOKEN=open"',
       'ReadWritePaths=/home/you/pb_data',
       'WantedBy=default.target',
     ]) {
@@ -65,7 +66,7 @@ void main() {
         exe: '/home/you/.local/bin/summareader-sync',
         addr: '10.10.20.1:9000',
         dir: '/home/you/pb_data',
-        token: 'sesame',
+        tokens: Tokens(metrics: 'sesame', operator: 'open'),
         compose: '/home/you/src/sync/docker-compose.yml',
         uid: 1000,
         gid: 1000,
@@ -97,23 +98,86 @@ void main() {
   // A console that mints a fresh token per window reports zero devices against
   // a server full of them, which reads exactly like a server nobody has paired
   // with. So the token is read back out of the unit that is already installed.
-  test('the token is read out of an installed unit, not minted again', () {
+  test('the tokens are read out of an installed unit, not minted again', () {
     final unit = renderUnit(
       const ServiceConfig(
         exe: '/bin/summareader-sync',
         addr: '127.0.0.1:8099',
         dir: '/data',
-        token: 'the-one-the-server-has',
+        tokens: Tokens(metrics: 'the-one-it-has', operator: 'and-the-other'),
       ),
     );
 
-    expect(
-      unitEnv(unit, 'SUMMAREADER_METRICS_TOKEN'),
-      'the-one-the-server-has',
-    );
+    final tokens = resolveTokens(const {}, unit);
+    expect(tokens.metrics, 'the-one-it-has');
+    expect(tokens.operator, 'and-the-other');
     expect(serviceBindIn(unit), '127.0.0.1:8099');
     // Two calls to the minter never agree, which is why reading matters.
     expect(newToken(), isNot(newToken()));
+  });
+
+  // 716: a scraper handed the metrics token must not be able to enrol a
+  // device, so the console's two are never one value.
+  test('a console with nothing installed mints two different tokens', () {
+    final tokens = resolveTokens(const {}, '');
+    expect(tokens.metrics, isNotEmpty);
+    expect(tokens.operator, isNotEmpty);
+    expect(tokens.metrics, isNot(tokens.operator));
+
+    final unit = renderUnit(
+      ServiceConfig(
+        exe: '/bin/s',
+        addr: '127.0.0.1:8099',
+        dir: '/d',
+        tokens: tokens,
+      ),
+    );
+    expect(
+      unitEnv(unit, 'SUMMAREADER_METRICS_TOKEN'),
+      isNot(unitEnv(unit, 'SUMMAREADER_OPERATOR_TOKEN')),
+    );
+  });
+
+  // The server reads its environment before its config file, so a variable
+  // from the console would quietly replace the operator's own setting.
+  test("the config file's metrics token wins over the console's", () {
+    const installed =
+        'Environment="SUMMAREADER_METRICS_TOKEN=old"\n'
+        'Environment="SUMMAREADER_OPERATOR_TOKEN=op"\n';
+    final tokens = resolveTokens(const {'metrics_token': ' mine '}, installed);
+
+    expect(tokens.metrics, 'mine');
+    expect(tokens.operator, 'op');
+    expect(
+      tokens.environment.containsKey('SUMMAREADER_METRICS_TOKEN'),
+      isFalse,
+    );
+    expect(tokens.environment['SUMMAREADER_OPERATOR_TOKEN'], 'op');
+
+    final unit = renderUnit(
+      ServiceConfig(
+        exe: '/bin/s',
+        addr: '127.0.0.1:8099',
+        dir: '/d',
+        tokens: tokens,
+      ),
+    );
+    expect(unit, isNot(contains('SUMMAREADER_METRICS_TOKEN')));
+  });
+
+  test('the unit is written readable by its owner alone', () async {
+    final home = Directory.systemTemp.createTempSync('console-mode');
+    addTearDown(() => home.deleteSync(recursive: true));
+
+    // Over a file an older console left readable by everybody, too.
+    final file = File('${home.path}/$unitName')..writeAsStringSync('old');
+    await Process.run('chmod', ['644', file.path]);
+
+    await writePrivate(file, 'Environment="SUMMAREADER_OPERATOR_TOKEN=x"\n');
+
+    expect(file.statSync().mode & 0x1ff, 0x180, reason: 'want 0600');
+    expect(file.readAsStringSync(), contains('OPERATOR_TOKEN=x'));
+    expect(File('${file.path}.tmp').existsSync(), isFalse);
   });
 
   // The exact bytes the QR carries, because they are a contract with the app.
@@ -249,7 +313,7 @@ void main() {
       // SQLite file is how a sync server corrupts itself.
       exe: null,
       dir: '/data',
-      token: 'sesame',
+      tokens: const Tokens(metrics: 'sesame', operator: 'open'),
       addr: '127.0.0.1:8099',
       managedBy: () => serviceInstalled(home.path),
     );
@@ -409,9 +473,9 @@ void _serverIssuedCode() {
       // The server has never held a key and cannot put one in. What it can do
       // is save somebody typing an address and a token, which is exactly what
       // the app accepts a keyless code for.
-      final decoded =
-          jsonDecode(pairingPayload('http://10.0.0.2:8099', 'a-token'))
-              as Map<String, dynamic>;
+      final decoded = jsonDecode(
+        pairingPayload('http://10.0.0.2:8099', 'a-token'),
+      ) as Map<String, dynamic>;
 
       expect(decoded['server'], 'http://10.0.0.2:8099');
       expect(decoded['device_token'], 'a-token');
@@ -553,7 +617,7 @@ void _startingWithTheWindow() {
               exe: '/bin/summareader-sync',
               addr: '1.2.3.4:9',
               dir: '/d',
-              token: 'sesame',
+              tokens: Tokens(metrics: 'sesame', operator: 'open'),
             ),
           ),
           isNot(contains('--supervisor-pid')),
@@ -960,9 +1024,8 @@ void _whereThingsAre() {
       // on the next start.
       final fallback = defaultDataDir(env());
       Directory(fallback).createSync(recursive: true);
-      File(
-        '$fallback/$configName',
-      ).writeAsStringSync('{"dir": "/srv/elsewhere"}');
+      File('$fallback/$configName')
+          .writeAsStringSync('{"dir": "/srv/elsewhere"}');
 
       final where = resolveDirs(const [], env());
       expect(
