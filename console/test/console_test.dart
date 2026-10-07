@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
@@ -13,6 +14,7 @@ import 'package:summareader_sync_console/src/updates.dart';
 import 'package:summareader_sync_console/src/first_run.dart';
 import 'package:summareader_sync_console/src/format.dart';
 import 'package:summareader_sync_console/src/pairing.dart';
+import 'package:summareader_sync_console/src/pairing_dialogs.dart';
 import 'package:summareader_sync_console/src/server.dart';
 import 'package:summareader_sync_console/src/service.dart';
 
@@ -398,6 +400,78 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  // Card 723: a desktop cannot scan its own screen, and the token alone is
+  // not a pairing code, so the whole code has to be copyable as text.
+  group('the pairing window', () {
+    const fingerprint =
+        'f32b2c8bd7968e71a17942945566c256da5c3603e57f3ab6f4c288efc57c50ae';
+    const device = FirstDevice(
+      accountId: 'acc',
+      deviceId: 'dev',
+      token: 'a-token',
+    );
+
+    Future<List<String>> open(WidgetTester tester, String addr) async {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showFirstDeviceToken(
+                context,
+                device,
+                addr,
+                const [],
+                fingerprint: fingerprint,
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      return copied;
+    }
+
+    testWidgets('copies the whole code, fingerprint and all', (tester) async {
+      final copied = await open(tester, '10.10.20.1:8099');
+
+      await tester.tap(find.text('Copy code'));
+      await tester.pump();
+
+      final code = jsonDecode(copied.single) as Map<String, dynamic>;
+      expect(code['server'], 'https://10.10.20.1:8099');
+      expect(code['device_token'], 'a-token');
+      expect(code['server_fingerprint'], fingerprint);
+    });
+
+    testWidgets('with no address to name, offers the token alone', (
+      tester,
+    ) async {
+      await open(tester, '127.0.0.1:8099');
+
+      expect(find.text('Copy code'), findsNothing);
+      expect(find.text('Copy token'), findsOneWidget);
+    });
   });
 
   // The complaint this file exists for: the address is changed in the window,
