@@ -302,7 +302,7 @@ func TestRevokedDeviceResolvesToNothing(t *testing.T) {
 
 	live := core.NewRecord(devices)
 	live.Set("account", account)
-	live.Set("token", "live-token")
+	live.Set("token", hashToken("live-token"))
 	live.Set("revoked", false)
 	if err := app.Save(live); err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestRevokedDeviceResolvesToNothing(t *testing.T) {
 
 	revoked := core.NewRecord(devices)
 	revoked.Set("account", account)
-	revoked.Set("token", "revoked-token")
+	revoked.Set("token", hashToken("revoked-token"))
 	revoked.Set("revoked", true)
 	if err := app.Save(revoked); err != nil {
 		t.Fatal(err)
@@ -472,7 +472,7 @@ func pairedDevice(t *testing.T, app core.App, account, token string) *core.Recor
 	}
 	device := core.NewRecord(devices)
 	device.Set("account", account)
-	device.Set("token", token)
+	device.Set("token", hashToken(token))
 	device.Set("revoked", false)
 	if err := app.Save(device); err != nil {
 		t.Fatal(err)

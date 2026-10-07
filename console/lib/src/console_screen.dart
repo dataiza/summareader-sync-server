@@ -99,19 +99,23 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     final exe = serverBinary();
 
     // A service installed on an earlier run owns the server, and its address
-    // and metrics token are on disk. Both are read back rather than starting
-    // from this console's defaults: a fresh token would leave the pane
-    // reporting zero devices against a server full of them, which reads
-    // exactly like a server nobody has paired with.
-    final token = serviceInstalled() && serviceMetricsToken().isNotEmpty
-        ? serviceMetricsToken()
-        : newToken();
+    // and tokens are on disk. Both are read back rather than starting from
+    // this console's defaults: a fresh token would leave the pane reporting
+    // zero devices against a server full of them, which reads exactly like a
+    // server nobody has paired with. A token in the config file beside the
+    // database beats both — see [resolveTokens].
     final installed = serviceInstalled() ? serviceBind() : '';
+    if (serviceInstalled()) {
+      // A unit an older console wrote is readable by everybody on the machine
+      // and holds the tokens. Narrowed on sight rather than at the next
+      // rewrite, which may never come. Card 716.
+      unawaited(narrow(unitPath()).catchError((Object e) => _fail(e)));
+    }
 
     _server = SyncServer(
       exe: exe,
       dir: _dir,
-      token: token,
+      tokens: resolveTokens(readConfig(_dir), installedUnit()),
       addr: installed.isEmpty ? widget.addr : installed,
     );
     _compose = exe == null ? null : composeFile(exe, _dir);
@@ -294,7 +298,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     exe: _server.exe ?? '',
     addr: addr ?? _server.addr,
     dir: _dir,
-    token: _server.token,
+    tokens: _server.tokens,
     compose: (docker ?? _docker) ? _compose : null,
     uid: _uid(),
     gid: _gid(),
@@ -379,11 +383,12 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// alone would leave the service on the old address; writing the unit alone
   /// would lose the address for every launch that is not the service.
   ///
-  /// The metrics token is deliberately *not* written here. The console mints
-  /// one per window for its own status pane, and a per-window secret in a file
-  /// on disk is a credential outliving the reason it existed — an operator who
-  /// wants a scraper sets `metrics_token` themselves, and that one this
-  /// console reads and never prints beside the address.
+  /// No token is written to the config file. With a unit installed both are
+  /// in the unit, which is written readable by its owner alone; without one
+  /// they live for as long as this window does. A `metrics_token` or
+  /// `operator_token` an operator wrote into the file beside the database is
+  /// read, used in preference to the console's own, and never shown beside
+  /// the address.
   /// Renames the server.
   ///
   /// Display only — the identity `/instance` answers with is generated and
@@ -701,7 +706,9 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         _server = SyncServer(
           exe: _server.exe,
           dir: wanted,
-          token: _server.token,
+          // Read again, because the server will read the config file beside
+          // the new directory and not the old one.
+          tokens: resolveTokens(readConfig(wanted), installedUnit()),
           addr: _server.addr,
         );
         _compose = _server.exe == null

@@ -36,7 +36,10 @@ func ensureSchema(app core.App) error {
 	if err := ensureDevices(app); err != nil {
 		return err
 	}
-	return ensureInstanceId(app)
+	if err := ensureInstanceId(app); err != nil {
+		return err
+	}
+	return lockDownBuiltins(app)
 }
 
 // A name for this database that no other database shares.
@@ -218,13 +221,18 @@ func ensureDevices(app core.App) error {
 		// quota_bytes is: an upgrade must not need its owner to run anything.
 		if existing.Fields.GetByName("last_seen") == nil {
 			existing.Fields.Add(lastSeenField())
-			return app.Save(existing)
+			if err := app.Save(existing); err != nil {
+				return err
+			}
 		}
-		return nil
+		return rehashTokens(app)
 	}
 
 	c := core.NewBaseCollection(collDevices)
 	c.Fields.Add(&core.TextField{Name: "account", Required: true, Max: 100})
+	// The token's SHA-256 in hex, never the token: see hashToken. The name is
+	// the one it had when it held the token itself, kept so that an upgrade
+	// changes values and not the schema.
 	c.Fields.Add(&core.TextField{Name: "token", Required: true, Max: 200})
 	c.Fields.Add(&core.TextField{Name: "label", Max: 200})
 	// Revocation is nominal: dropping the token stops this device syncing.
@@ -236,4 +244,36 @@ func ensureDevices(app core.App) error {
 
 	c.AddIndex("idx_devices_token", true, "token", "")
 	return app.Save(c)
+}
+
+// rehashTokens replaces every token stored as it was issued with its hash.
+// Card 714.
+//
+// A database written before tokens were hashed holds them in the clear, and
+// the devices holding them must go on syncing without being paired again. So
+// each boot hashes whatever is not a hash yet, and the token a device presents
+// hashes to the same value it always would have. Repeating it is harmless —
+// looksHashed is why — so there is no flag to say it has been done.
+//
+// One transaction, so the collection is never half one thing and half the
+// other. It holds a row per device, so reading all of it is no cost worth
+// avoiding.
+func rehashTokens(app core.App) error {
+	records, err := app.FindAllRecords(collDevices)
+	if err != nil {
+		return err
+	}
+	return app.RunInTransaction(func(tx core.App) error {
+		for _, record := range records {
+			stored := record.GetString("token")
+			if looksHashed(stored) {
+				continue
+			}
+			record.Set("token", hashToken(stored))
+			if err := tx.Save(record); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

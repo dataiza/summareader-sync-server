@@ -8,6 +8,11 @@ allreader-sync-server
 # Where scripts/build.sh puts things.
 dist/
 
+# Any Windows build. One was committed once (card 717), made by running the
+# CI's cross-build check by hand; releases are built by the release workflow,
+# never from a working tree.
+*.exe
+
 # The console's build output and pub cache. The Go module never sees console/
 # — it has no .go files in it — but git would happily commit a 60 MB bundle.
 console/build/

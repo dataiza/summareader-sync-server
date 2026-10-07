@@ -30,8 +30,9 @@ token there is nobody to authorise the request:
 ./summareader-sync first-device "My library" "Desktop" --dir=./pb_data
 ```
 
-It prints a token once, and it is not recoverable — the server keeps only
-something to compare against. Paste it into SummaReader on that device. Add
+It prints a token once, and it is not recoverable — the server keeps only its
+SHA-256, to compare against, so neither the database nor a backup of it holds
+a token anybody could use. Paste it into SummaReader on that device. Add
 `--json` for scripting.
 
 **Every device after the first joins from a device that is already paired**, by
@@ -117,12 +118,26 @@ this version has never heard of, so a comment or a newer server's setting
 survives a port change. The write is a temporary file and a rename, and a
 malformed existing file is refused rather than replaced.
 
-**The metrics token is deliberately not written by the console.** The console
-mints one per window for its own status pane and hands it to the server it
-starts; persisting that would turn a secret that exists for the life of a
-window into a credential on disk outliving the reason for it. An operator who
-wants a scraper sets `metrics_token` themselves — and that one the console
-reads and uses, and never shows next to the address in the window, where the
+**The console never writes a token into this file.** It holds two of its own,
+and they are different values: a metrics token for its status pane and an
+operator token for the device controls, so a metrics token handed to a scraper
+cannot enrol or remove a device. Where they live depends on who runs the
+server:
+
+- **The window's own server** gets both in its environment. They are minted
+  when the window opens and kept nowhere, so they last as long as the window.
+- **A unit installed with *Start at login*** carries both as `Environment=`
+  lines in `~/.config/systemd/user/summareader-sync.service`, so a window opened
+  later can still talk to the server. The console writes that file readable by
+  you alone (mode 0600), and narrows one an older console left readable by
+  everybody as soon as it opens. A unit installed before the two were separate
+  holds one value under both names, and keeps it across rewrites, because the
+  server it runs holds that value too. To give it two, turn *Start at login*
+  off, reopen the console, and turn it on again.
+
+A `metrics_token` or `operator_token` you set in this file wins over the
+console's own: the console uses it and does not pass the variable that would
+override it. It is never shown next to the address in the window, where the
 address is meant to be copied and the token is not.
 
 ## The desktop console
@@ -302,6 +317,28 @@ raw inspection live. Create a superuser to reach it:
 docker compose exec sync summareader-sync superuser create you@example.com
 ```
 
+**The dashboard and PocketBase's API under `/api/` answer only on the machine
+the server runs on.** Anybody else gets a 403, whatever address the server is
+bound to; the sync routes a device uses are not affected. From another machine,
+tunnel to it:
+
+```sh
+ssh -L 8099:127.0.0.1:8099 you@sync-host    # then open http://127.0.0.1:8099/_/
+```
+
+A request that arrives through a reverse proxy counts as remote even when the
+proxy runs on the same machine — the proxy's forwarding header gives it away —
+so putting one in front does not open the dashboard to whoever it serves. In
+the container the host is not "this machine" either: Docker relays the
+connection from its bridge, so the dashboard is out of reach there, and the
+`superuser` and backup commands through `docker compose exec` are what is left.
+
+Logging in to the dashboard is limited to five attempts a minute per address,
+and the users collection PocketBase creates for itself is closed: nothing here
+signs anybody up, and left open it let anyone create accounts until the disk
+was full. Both are put back on every start. No web page may call the server
+either — CORS is off unless `serve --origins` names the pages that may.
+
 **What an admin interface here can and cannot do is decided by the encryption,
 not by effort.** The server holds opaque ciphertext and no keys. So it can:
 
@@ -340,8 +377,10 @@ drift out of step with wipes and deletions. Payload bytes only: row overhead
 and indexes are real disk too, but a ceiling somebody can reason about is worth
 more than one that is exactly right.
 
-**Request rate.** PocketBase ships its own rate limiter, disabled by default,
-under Settings → Rate limits in the dashboard. Rules match by path prefix, so
+**Request rate.** PocketBase ships its own rate limiter, under Settings → Rate
+limits in the dashboard. It is on — the server turns it on at every start, for
+the dashboard's login — but none of its rules reach a sync route until you add
+one. Rules match by path prefix, so
 `/append` and `/blob` can be limited without any code here. It is per-client,
 not per-account, which is the right shape for abuse and the wrong shape for
 billing — if you ever need a ceiling per paying account, that is a different
