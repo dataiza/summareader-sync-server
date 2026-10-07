@@ -3,6 +3,41 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.0.0
+
+**Sync is encrypted, and the app must be 0.87.0 or later.** On first start
+the server makes its own certificate in its data folder and serves HTTPS with
+it; the start-up line, `first-device` and the console show its fingerprint,
+which the app pins. An app older than 0.87.0 cannot connect. To move an
+existing server, update the app on every device first; if one device must
+wait, set `"insecure_http": true` in `summareader-sync.json` to answer plain
+HTTP as well until it is updated, then remove it. RUNNING.md walks through it.
+After the move, making a new recovery code in the app retires the old one,
+whose proof travelled unencrypted.
+
+**Joining with a recovery code cannot be replayed.** The app signs a
+single-use nonce instead of sending a proof; a code made before this joins
+once the old way and is then replaced.
+
+**Devices are told about each other.** Enrolment, recovery-code joins, a new
+recovery code and a wipe are recorded, and the app shows them; enrolment and
+joining are limited per account.
+
+**PocketBase's own admin page and API answer only the machine itself.** Its
+user sign-up is closed, logins are rate-limited, and no web page can call it
+from a browser. Under Docker the admin page is no longer reachable from the
+host; see RUNNING.md.
+
+**Device tokens are stored as hashes.** Existing devices keep working; their
+tokens are rehashed on the first start.
+
+**The console keeps the metrics and operator tokens apart** and writes the
+service file readable only by you. A service file from an older console keeps
+one token for both until *Start at login* is turned off and on again.
+
+`devices list` works when the metrics and operator tokens differ. A Windows
+binary committed by mistake is gone from the repository.
+
 ## 0.8.1
 
 A lookup that failed is no longer reported as a device the server has never
