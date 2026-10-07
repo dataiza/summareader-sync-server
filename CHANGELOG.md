@@ -3,6 +3,14 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.0.2
+
+**The console can copy the whole pairing code.** Its pairing window showed the
+full code only as a QR image and copied just the token, so a desktop had
+nothing to paste into the app. *Copy code* copies the address, the token and
+the certificate fingerprint together; paste it into the app's pairing-code
+box.
+
 ## 1.0.1
 
 The first 1.0 to go out: 1.0.0 stopped while its console was being packaged,
