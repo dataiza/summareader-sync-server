@@ -218,12 +218,30 @@ class _TokenBodyState extends State<_TokenBody> {
                     style: Ar.bodyStyle(13, height: 1.5),
                   ),
                   const SizedBox(height: 10),
-                  PillButton(
-                    label: 'Copy token',
-                    icon: Icons.copy_all_outlined,
-                    onTap: () => Clipboard.setData(
-                      ClipboardData(text: widget.device.token),
-                    ),
+                  // The whole code first, because it is what a desktop needs:
+                  // it cannot scan its own screen, and the app's pairing-code
+                  // box refuses a bare token. The token stays for the case of
+                  // typing one in by hand. Card 723.
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (payload != null)
+                        PillButton(
+                          label: 'Copy code',
+                          icon: Icons.copy_all_outlined,
+                          onTap: () => Clipboard.setData(
+                            ClipboardData(text: payload),
+                          ),
+                        ),
+                      PillButton(
+                        label: 'Copy token',
+                        icon: Icons.copy_all_outlined,
+                        onTap: () => Clipboard.setData(
+                          ClipboardData(text: widget.device.token),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -255,7 +273,8 @@ class _TokenBodyState extends State<_TokenBody> {
           payload == null
               ? 'Shown once. No address on this network to put in a code — '
                     'the server is on loopback, so type the token in by hand.'
-              : 'Scan on a phone, or copy the token. Shown once, for $where.',
+              : 'Scan on a phone. On a desktop, use Copy code and paste it '
+                    'into the app. Shown once, for $where.',
           style: Ar.bodyStyle(12.5, color: Ar.dim(0.7), height: 1.5),
         ),
         if (widget.fingerprint case final fingerprint?) ...[
