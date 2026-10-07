@@ -9,6 +9,8 @@ Building any of them is [BUILD.md](BUILD.md).
 
 - [The first device, and every one after it](#the-first-device-and-every-one-after-it)
 - [Command line](#command-line)
+- [Encryption, and the fingerprint](#encryption-and-the-fingerprint)
+- [What the devices hear](#what-the-devices-hear)
 - [Configuration](#configuration)
 - [The desktop console](#the-desktop-console)
 - [Docker](#docker)
@@ -32,8 +34,10 @@ token there is nobody to authorise the request:
 
 It prints a token once, and it is not recoverable — the server keeps only its
 SHA-256, to compare against, so neither the database nor a backup of it holds
-a token anybody could use. Paste it into SummaReader on that device. Add
-`--json` for scripting.
+a token anybody could use. Paste it into SummaReader on that device, with the
+address starting `https://`. It prints the server's certificate fingerprint
+too, and the app shows one on first contact: they should be the same. Add
+`--json` for scripting, which carries the fingerprint as `fingerprint`.
 
 **Every device after the first joins from a device that is already paired**, by
 scanning that app's pairing code. That code carries the library's *master key*,
@@ -43,10 +47,14 @@ device's own *server* token, which the app asks for over the network while you
 scan:
 
 ```sh
-curl -X POST http://127.0.0.1:8099/enroll \
+curl -k -X POST https://127.0.0.1:8099/enroll \
   -H "Authorization: Bearer <existing-token>" \
   -d '{"label":"Phone"}'
 ```
+
+(`-k` because no authority vouches for the server's own certificate; on this
+machine, against loopback, that costs nothing. From anywhere else, let the app
+do it — it checks the fingerprint, and curl cannot.)
 
 Separate tokens per device are what make revoking one device possible at all.
 
@@ -66,10 +74,84 @@ or, spelled out:
 ./summareader-sync serve --http=127.0.0.1:8099 --dir=./pb_data
 ```
 
-`--http` is the address it binds; `--dir` is where the database lives. Bound to
-localhost by default, because this server speaks plain HTTP and holds
-everybody's ciphertext — a public interface means device tokens crossing the
-network in the clear. `SYNC_ADDR` and `SYNC_DIR` are what `run.sh` reads.
+`--http` is the address it binds; `--dir` is where the database lives. The
+flag keeps PocketBase's name, but what it serves is HTTPS — see below. Bound to
+localhost by default all the same: a server holding everybody's ciphertext is
+not something to put on an interface by accident. `SYNC_ADDR` and `SYNC_DIR`
+are what `run.sh` reads.
+
+## Encryption, and the fingerprint
+
+Every connection is TLS. On its first start the server makes an ECDSA P-256
+key and a self-signed certificate valid for a hundred years, and keeps them
+beside the database as `tls-key.pem` and `tls-cert.pem`, readable by their
+owner alone. It prints the certificate's SHA-256 fingerprint at every start:
+
+```
+serving https on 10.10.20.1:8099; certificate fingerprint (SHA-256) 66:40:05:…:18:E5
+```
+
+No authority vouches for that certificate, and none needs to. A device trusts
+the one certificate whose fingerprint it was given — in a pairing code, which
+carries it, or by its owner comparing what the app shows with what the console
+or the log shows — and nothing else, not even a certificate an authority
+signed for the same address. That is a stronger promise than an authority
+makes, and it needs no domain name, which a server on a home network has not
+got.
+
+**The two files are the server's identity.** Back them up with the database;
+PocketBase's own backups include them. If they are lost, the server makes a
+new pair on its next start, and every paired device then stops and asks,
+loudly, whether to trust a certificate it has never seen — which is exactly
+what it would ask if something else were answering in the server's place. A
+server finding one of the two files without the other refuses to start rather
+than replacing them.
+
+### Moving an existing server to HTTPS
+
+A server from before this answered plain HTTP, and the devices paired with it
+know it by an `http://` address. After updating:
+
+1. **The server** starts serving HTTPS on the same address and port, and makes
+   its certificate. Plain HTTP is refused — unless it was started with
+   `--insecure-http` (or `"insecure_http": true` in the config file, or
+   `SUMMAREADER_INSECURE_HTTP=1`), which answers both on the one port. Set
+   that *before* updating if some device's app cannot be updated at the same
+   time, so it keeps syncing in the meantime. A device left on an older app
+   without it is not unpaired: its syncs fail with a refusal until its app is
+   updated, and it keeps everything it holds.
+2. **The console**, once updated, reads the certificate out of the data
+   directory, shows the fingerprint under the status line, and talks to the
+   server over HTTPS pinned to it. An older console against a server that
+   refuses plain HTTP shows no counts and cannot work the device controls.
+   An installed unit needs no change: neither its command line nor its tokens
+   are any different.
+3. **Each app**, once updated, finds the server offering a certificate it has
+   not agreed to, stops before sending anything, and shows the fingerprint.
+   Compare it with the console's; if they match, the app trusts it, moves its
+   address to `https://`, and carries on with the pairing it already had. It
+   asks once per device.
+4. When every device has moved, take `--insecure-http` off again. It is for
+   one release: the next one does not have it.
+
+A recovery code made before this still works, but the first join with it
+sends the proof it was made with as it is, and an old proof may have been
+captured while it crossed the network in the clear. The app replaces it with a
+signed one the moment such a join lets it in; making a new recovery code in
+the app does the same straight away.
+
+## What the devices hear
+
+Any device's token can add another device, replace the recovery code, or wipe
+the library. So each of those writes a line the server keeps for the account,
+and every other device reads it after its next sync and shows it as a notice —
+"A new device, iPad, joined on 6 October" — with a button that stops that
+device. What a device did itself it is not told about. A device added from the
+console is reported too, as being added by the operator.
+
+A device token can add at most ten devices to its library in an hour; the
+eleventh is refused with 429 and a sentence saying to wait. The console's own
+*Add a device* is not limited — it is the machine's owner.
 
 ## Configuration
 
@@ -89,6 +171,7 @@ A server with no config file behaves exactly as it did before there was one.
 | `--dir` | `SUMMAREADER_DIR` | `dir` | where the database lives |
 | — | `SUMMAREADER_METRICS_TOKEN` | `metrics_token` | the credential `/metrics` wants; empty means the endpoint is off |
 | `--no-announce` | `SUMMAREADER_NO_ANNOUNCE` | `no_announce` | do not advertise on the local network |
+| `--insecure-http` | `SUMMAREADER_INSECURE_HTTP` | `insecure_http` | also answer plain HTTP beside HTTPS on the same port, for apps not yet updated; one transition release |
 | `--supervisor-pid` | — | — | stop when that process is gone; the console passes its own pid so a killed window does not leave a server behind |
 | `--config` | `SUMMAREADER_CONFIG` | — | where the file itself is |
 
@@ -287,7 +370,8 @@ one place to look when it did not come back.
 
 ## Finding it on a local network
 
-The server advertises itself over mDNS as `_summareader-sync._tcp`, so a client
+The server advertises itself over mDNS as `_summareader-sync._tcp`, with
+`scheme=https` in its text record, so a client
 on the same network can offer it rather than asking somebody to read an IP
 address off a router. `serve --no-announce` turns it off, for networks that
 would rather nothing multicast and for hosted instances that have no reason to
@@ -323,8 +407,12 @@ bound to; the sync routes a device uses are not affected. From another machine,
 tunnel to it:
 
 ```sh
-ssh -L 8099:127.0.0.1:8099 you@sync-host    # then open http://127.0.0.1:8099/_/
+ssh -L 8099:127.0.0.1:8099 you@sync-host    # then open https://127.0.0.1:8099/_/
 ```
+
+The browser will warn about the certificate, because no authority signed it.
+The fingerprint it shows in its certificate details is the one the server
+printed at start.
 
 A request that arrives through a reverse proxy counts as remote even when the
 proxy runs on the same machine — the proxy's forwarding header gives it away —

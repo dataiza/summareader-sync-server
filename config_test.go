@@ -307,3 +307,24 @@ func TestTheConfigFileDoesNotFollowItsOwnDirKey(t *testing.T) {
 		t.Fatalf("configPath = %q, want it to stay at the default %q", path, filepath.Join(def, configName))
 	}
 }
+
+// Card 713: a server installed as a unit gets the transition flag from its
+// config file or its environment, without the unit being rewritten.
+func TestInsecureHTTPComesFromTheFileOrTheEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	args := []string{"x", "serve", "--dir=" + dir}
+
+	cfg, err := resolveConfig(args, envOf(nil))
+	if err != nil || cfg.InsecureHTTP {
+		t.Fatalf("plain http was on by default: %+v, %v", cfg, err)
+	}
+
+	writeConfig(t, dir, `{"insecure_http":true}`)
+	if cfg, _ := resolveConfig(args, envOf(nil)); !cfg.InsecureHTTP {
+		t.Fatal("the file's insecure_http was not read")
+	}
+	off := envOf(map[string]string{"SUMMAREADER_INSECURE_HTTP": "0"})
+	if cfg, _ := resolveConfig(args, off); cfg.InsecureHTTP {
+		t.Fatal("the environment did not win over the file")
+	}
+}

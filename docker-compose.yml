@@ -66,7 +66,10 @@ services:
       # /instance needs no token, which is what makes it usable here: it is
       # the endpoint a client calls to tell "wrong URL" from "right URL, no
       # data", and it answers exactly when the server is able to answer.
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8099/instance"]
+      #
+      # -k since card 713: the certificate is the server's own, no authority
+      # vouches for it, and a liveness check sends nothing worth pinning.
+      test: ["CMD", "curl", "-fsSk", "https://127.0.0.1:8099/instance"]
       interval: 30s
       timeout: 5s
       # Generous, because the first start creates the database and runs the

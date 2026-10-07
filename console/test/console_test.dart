@@ -370,6 +370,36 @@ void main() {
     expect(state.countsLine, '0 devices · 0 entries · 0.0 MB');
   });
 
+  // Card 713: the fingerprint is what somebody compares against the question
+  // a device asks on first contact, so the window shows it where the address
+  // is.
+  testWidgets('the window shows the fingerprint and says https', (
+    tester,
+  ) async {
+    const fingerprint =
+        'f32b2c8bd7968e71a17942945566c256da5c3603e57f3ab6f4c288efc57c50ae';
+    const state = ConsoleState(
+      dir: '/data',
+      addr: '10.10.20.1:8099',
+      running: true,
+      serverBinary: '/bin/summareader-sync',
+      fingerprint: fingerprint,
+    );
+    expect(state.statusLine, 'Running on https://10.10.20.1:8099');
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: ConsoleView(state: state)),
+      ),
+    );
+    expect(
+      find.text(
+        'Certificate fingerprint (SHA-256): ${displayFingerprint(fingerprint)}',
+      ),
+      findsOneWidget,
+    );
+  });
+
   // The complaint this file exists for: the address is changed in the window,
   // the window is closed, and it is back to the default. It has to survive.
   group('the config file', () {

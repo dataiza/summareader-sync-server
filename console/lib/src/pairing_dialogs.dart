@@ -67,14 +67,20 @@ Future<void> showFirstDeviceToken(
   BuildContext context,
   FirstDevice device,
   String addr,
-  List<LanAddr> lan,
-) {
+  List<LanAddr> lan, {
+  String? fingerprint,
+}) {
   final (_, port) = splitBind(addr);
   final hosts = pairingHosts(addr, lan);
   return showConsoleDialog(
     context,
     'Paste this into SummaReader',
-    _TokenBody(device: device, hosts: hosts, port: port),
+    _TokenBody(
+      device: device,
+      hosts: hosts,
+      port: port,
+      fingerprint: fingerprint,
+    ),
   );
 }
 
@@ -90,8 +96,9 @@ Future<void> showDeviceCode(
   BuildContext context,
   FirstDevice device,
   String addr,
-  List<LanAddr> lan,
-) {
+  List<LanAddr> lan, {
+  String? fingerprint,
+}) {
   final (_, port) = splitBind(addr);
   return showConsoleDialog(
     context,
@@ -101,6 +108,7 @@ Future<void> showDeviceCode(
       hosts: pairingHosts(addr, lan),
       port: port,
       keyless: true,
+      fingerprint: fingerprint,
     ),
   );
 }
@@ -111,11 +119,16 @@ class _TokenBody extends StatefulWidget {
     required this.hosts,
     required this.port,
     this.keyless = false,
+    this.fingerprint,
   });
 
   final FirstDevice device;
   final List<LanAddr> hosts;
   final String port;
+
+  /// The server's certificate, which the code carries and the dialog shows.
+  /// Null for a server from before certificates. Card 713.
+  final String? fingerprint;
 
   /// Whether to say that this code carries no key. True for every device
   /// after the first, where it is the one thing worth being clear about.
@@ -137,10 +150,18 @@ class _TokenBodyState extends State<_TokenBody> {
     final chosen = _chosen;
     final where = chosen == null
         ? ''
-        : reachableUrl('${chosen.ip}:${widget.port}', widget.hosts);
+        : reachableUrl(
+            '${chosen.ip}:${widget.port}',
+            widget.hosts,
+            secure: widget.fingerprint != null,
+          );
     final payload = where.isEmpty
         ? null
-        : pairingPayload(where, widget.device.token);
+        : pairingPayload(
+            where,
+            widget.device.token,
+            fingerprint: widget.fingerprint,
+          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,6 +258,23 @@ class _TokenBodyState extends State<_TokenBody> {
               : 'Scan on a phone, or copy the token. Shown once, for $where.',
           style: Ar.bodyStyle(12.5, color: Ar.dim(0.7), height: 1.5),
         ),
+        if (widget.fingerprint case final fingerprint?) ...[
+          const SizedBox(height: 10),
+          // Shown for the case the code cannot cover: a token typed in by
+          // hand. The app then shows the fingerprint it was handed on first
+          // contact, and this is what to compare it with.
+          Text(
+            'The server\'s certificate fingerprint (SHA-256). The code '
+            'carries it; if you type the token in instead, the app shows a '
+            'fingerprint to compare with this one:',
+            style: Ar.bodyStyle(12.5, color: Ar.dim(0.7), height: 1.5),
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            displayFingerprint(fingerprint),
+            style: Ar.bodyStyle(12, height: 1.5),
+          ),
+        ],
         const SizedBox(height: 10),
         Text(
           'This code carries an address and a token, and no key. Anyone who '
@@ -260,11 +298,12 @@ Future<void> showAddDevice(
   BuildContext context,
   int devices,
   String addr,
-  List<LanAddr> lan,
-) {
-  final where = reachableUrl(addr, lan).isEmpty
-      ? 'http://$addr'
-      : reachableUrl(addr, lan);
+  List<LanAddr> lan, {
+  bool secure = false,
+}) {
+  final where = reachableUrl(addr, lan, secure: secure).isEmpty
+      ? '${secure ? 'https' : 'http'}://$addr'
+      : reachableUrl(addr, lan, secure: secure);
   final command =
       'curl -X POST $where/enroll \\\n'
       "  -H 'Authorization: Bearer <a token this account already has>' \\\n"

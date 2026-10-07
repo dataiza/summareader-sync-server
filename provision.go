@@ -251,6 +251,10 @@ func setJoinVerifier(app core.App, accountID, verifier string) error {
 // proves is knowledge of the recovery code, which is ~147 bits, so guessing is
 // not a threat worth rate-limiting. Nothing is created on a failed attempt.
 //
+// This is the legacy half since card 713, for codes whose verifier is a hash
+// of the proof; see join.go for the signed one, and for why the proof alone
+// could be replayed.
+//
 // The empty check is load-bearing rather than tidiness. Every account made
 // before join_verifier existed holds "", so a filter on the verifier alone
 // would match all of them at once and hand a token to whoever asked with
@@ -274,14 +278,8 @@ func joinDevice(app core.App, proof, label string) (*Device, error) {
 
 	// The same enrolment an existing device would have performed, so a joined
 	// device is an ordinary device: revocable, listable, nothing special about
-	// how it got here — including the name being made free rather than
-	// refused, since a device joining from a typed code has even less of a
-	// person watching than one being paired.
-	free, err := freeLabel(app, record.Id, label)
-	if err != nil {
-		return nil, err
-	}
-	return enrollDevice(app, record.Id, free)
+	// how it got here. See joinAccount.
+	return joinAccount(app, record.Id, label)
 }
 
 // listDevices returns an account's devices, without their tokens.

@@ -42,7 +42,13 @@ class ConsoleState {
     this.updateSaid,
     this.autoUpdate = false,
     this.updateInstalled,
+    this.fingerprint,
   });
+
+  /// The SHA-256 of the server's certificate, or null for a server that has
+  /// none yet. Shown, because it is what somebody compares against the
+  /// question a device asks on first contact. Card 713.
+  final String? fingerprint;
 
   /// A newer release, found and not yet accepted. Replacing the program
   /// somebody is running is not something to do because they pressed "check".
@@ -117,7 +123,7 @@ class ConsoleState {
     if (serverBinary == null) return 'No server binary found';
     if (!running) return 'Stopped';
     // Who is running it is the badge beside this line, not more words in it.
-    return 'Running on http://$addr';
+    return 'Running on ${fingerprint == null ? 'http' : 'https'}://$addr';
   }
 
   /// The same state with a different message, or none. One-line copiers
@@ -191,6 +197,7 @@ class ConsoleState {
     // where the new image is and this dropped it on the way through, so the
     // line about restarting arrived without the button that does it.
     updateInstalled: keepUpdate ? this.updateInstalled : updateInstalled,
+    fingerprint: fingerprint,
   );
 
   String get countsLine =>
@@ -680,6 +687,12 @@ class _ConsoleViewState extends State<ConsoleView> {
               ],
             ),
             Text(state.countsLine, style: Ar.bodyStyle(13, color: Ar.dim(0.6))),
+            if (state.fingerprint case final fingerprint?)
+              SelectableText(
+                'Certificate fingerprint (SHA-256): '
+                '${displayFingerprint(fingerprint)}',
+                style: Ar.bodyStyle(12, color: Ar.dim(0.6), height: 1.5),
+              ),
             if (missing)
               Text(
                 'No summareader-sync beside this console or on PATH. Build one '

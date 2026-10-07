@@ -44,14 +44,41 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 		if base == "" {
 			base = "127.0.0.1:8090"
 		}
+		// https unless told otherwise, since card 713, and checked against the
+		// certificate in this machine's own data directory rather than against
+		// any authority: the operator is on the box, so the file is the
+		// ground truth. An explicit http:// still works against a server
+		// started with --insecure-http.
 		if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
-			base = "http://" + base
+			base = "https://" + base
 		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		if strings.HasPrefix(base, "https://") {
+			fp, err := localFingerprint(app.DataDir())
+			if err != nil {
+				return nil, fmt.Errorf("nothing to check the server's certificate "+
+					"against (%w); pass --dir if the server keeps its data elsewhere", err)
+			}
+			client.Transport = &http.Transport{TLSClientConfig: pinnedTLS(fp)}
+		}
+		// The listing is a read, and since the console split its secrets
+		// (card 716) /overview answers to the metrics token, not the operator
+		// one; sending the operator token there was refused whenever the two
+		// differed. The writes under /operator still take the operator token.
+		reading := path == "/overview"
 		want := strings.TrimSpace(token)
 		if want == "" {
-			want = operatorToken()
+			if reading {
+				want = metricsToken()
+			} else {
+				want = operatorToken()
+			}
 		}
 		if want == "" {
+			if reading {
+				return nil, fmt.Errorf(
+					"no metrics token. Set SUMMAREADER_METRICS_TOKEN, or pass --token")
+			}
 			return nil, fmt.Errorf(
 				"no operator token. Set SUMMAREADER_OPERATOR_TOKEN, or pass --token")
 		}
@@ -75,7 +102,6 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 		}
 		req.Header.Set("Authorization", "Bearer "+want)
 
-		client := &http.Client{Timeout: 5 * time.Second}
 		res, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("could not reach the server at %s: %w", base, err)
@@ -87,7 +113,7 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 		}
 		if res.StatusCode == http.StatusNotFound && path == "/overview" {
 			return nil, fmt.Errorf(
-				"the server has no operator token set, so these commands are off")
+				"the server has no metrics token set, so it cannot list devices")
 		}
 		if res.StatusCode >= 400 {
 			return nil, fmt.Errorf("%s: %s", res.Status, strings.TrimSpace(string(payload)))
