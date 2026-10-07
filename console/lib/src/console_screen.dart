@@ -282,6 +282,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         // line saying the update is in place survived the tick and the button
         // that acts on it did not.
         updateInstalled: _state.updateInstalled,
+        fingerprint: _server.fingerprint,
       );
     });
   }
@@ -782,17 +783,35 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       final device = await _server.enrol('A new device');
       if (!mounted) return;
       if (device == null) {
-        await showAddDevice(context, _state.devices, _server.addr, _lan);
+        await showAddDevice(
+          context,
+          _state.devices,
+          _server.addr,
+          _lan,
+          secure: _server.fingerprint != null,
+        );
         return;
       }
-      await showDeviceCode(context, device, _server.addr, _lan);
+      await showDeviceCode(
+        context,
+        device,
+        _server.addr,
+        _lan,
+        fingerprint: _server.fingerprint,
+      );
       await _refresh();
       return;
     }
     try {
       final device = await runFirstDevice(_server);
       if (!mounted) return;
-      await showFirstDeviceToken(context, device, _server.addr, _lan);
+      await showFirstDeviceToken(
+        context,
+        device,
+        _server.addr,
+        _lan,
+        fingerprint: _server.fingerprint,
+      );
     } on Object catch (error) {
       _fail(error);
     }
@@ -944,7 +963,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   Widget build(BuildContext context) => ConsoleView(
     state: _state,
     onToggle: _toggle,
-    onDashboard: () => launchUrl(Uri.parse('http://${_server.addr}/_/')),
+    onDashboard: () => launchUrl(
+      Uri.parse(
+        '${_server.fingerprint == null ? 'http' : 'https'}://${_server.addr}/_/',
+      ),
+    ),
     onPair: _pair,
     onBind: (host) => _rebind('$host:${splitBind(_server.addr).$2}'),
     onPort: (port) {

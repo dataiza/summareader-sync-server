@@ -13,7 +13,13 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-base="http://127.0.0.1:8099"
+base="https://127.0.0.1:8099"
+
+# The server's certificate is its own (card 713), so no authority vouches for
+# it and curl would refuse it. This script talks to a container it just
+# started, on loopback; checking the fingerprint is the app's job and the
+# console's, and is tested there.
+curl() { command curl -k "$@"; }
 pass=0
 
 say() { printf '  %s\n' "$*"; }

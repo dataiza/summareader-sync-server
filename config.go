@@ -45,6 +45,10 @@ type Config struct {
 	Name string `json:"name,omitempty"`
 	// Do not advertise this server on the local network.
 	NoAnnounce bool `json:"no_announce,omitempty"`
+	// Also answer plain HTTP beside TLS, for devices whose app predates card
+	// 713. Here as well as on the command line so that a server installed as
+	// a unit can be given it without rewriting the unit.
+	InsecureHTTP bool `json:"insecure_http,omitempty"`
 	// How long /subscribe holds a request open, in seconds.
 	//
 	// Zero — the default — means [defaultHold]. A deliberate zero is spelled
@@ -168,6 +172,9 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)
+	}
+	if v := getenv("SUMMAREADER_INSECURE_HTTP"); v != "" {
+		cfg.InsecureHTTP = truthy(v)
 	}
 	if v := strings.TrimSpace(getenv("SUMMAREADER_HOLD")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

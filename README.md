@@ -151,8 +151,12 @@ add a device.
 ./summareader-sync version
 ```
 
-`--http` is the bind address, `--dir` where the database lives. Localhost by
-default: this is plain HTTP carrying device tokens.
+`--http` is the bind address, `--dir` where the database lives. What it serves
+is HTTPS, with a certificate the server makes for itself on first start; the
+fingerprint it prints is what devices trust instead of an authority. See
+[RUNNING.md](RUNNING.md#encryption-and-the-fingerprint), including for
+`--insecure-http`, which keeps plain HTTP beside it for one release while apps
+are updated.
 
 Every flag is also an environment variable (`SUMMAREADER_HTTP`,
 `SUMMAREADER_DIR`, `SUMMAREADER_NAME`, `SUMMAREADER_NO_ANNOUNCE`,
@@ -182,8 +186,10 @@ answers.
 Flags on all of them: `--addr` (the running server), `--token` (the operator
 token), `--json`.
 
-These speak HTTP to the running server, so `SUMMAREADER_OPERATOR_TOKEN` must be
-set on both. Without it the routes are off and the commands say so.
+These speak HTTPS to the running server, checked against the certificate in
+the data directory (`--dir` if it is not the default), so they are run on the
+server's machine; `SUMMAREADER_OPERATOR_TOKEN` must be set on both. Without it
+the routes are off and the commands say so.
 
 What a revoked or removed device already downloaded stays on it — the key is on
 the device.

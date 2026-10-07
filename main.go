@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +64,10 @@ func main() {
 	}
 	app := pocketbase.NewWithConfig(pocketbase.Config{
 		DefaultDataDir: dataDir,
+		// PocketBase's banner announces http:// whatever the listener does,
+		// and since card 713 that is never the whole truth. The line printed
+		// in OnServe says what is actually being served, and how to check it.
+		HideStartBanner: true,
 	})
 
 	app.OnBootstrap().BindFunc(func(e *core.BootstrapEvent) error {
@@ -106,6 +112,41 @@ func main() {
 			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName)
 		}
 
+		// TLS on the listener rather than through PocketBase's own https
+		// support, which exists to fetch a certificate from an authority for a
+		// public domain name — the one thing a server on a home network has
+		// not got. PocketBase serves whatever listener it is handed, and this
+		// one decrypts. Card 713.
+		cert, fp, err := loadOrCreateCertificate(e.App.DataDir())
+		if err != nil {
+			return err
+		}
+		addr := e.Server.Addr
+		if addr == "" {
+			addr = "127.0.0.1:8090"
+		}
+		raw, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		e.Listener = secureListener(raw, cert, insecureHTTP)
+		// The first-run link to create an administrator is built by
+		// PocketBase as http://, from the same flag that decides its own TLS,
+		// and would lead to a page this listener refuses.
+		e.InstallerFunc = func(app core.App, su *core.Record, baseURL string) error {
+			return apis.DefaultInstallerFunc(app, su,
+				strings.Replace(baseURL, "http://", "https://", 1))
+		}
+		// Printed every start, because it is what somebody compares against
+		// the question a device asks, and the log is where they will look.
+		log.Printf("serving https on %s; certificate fingerprint (SHA-256) %s",
+			addr, displayFingerprint(fp))
+		if insecureHTTP {
+			log.Printf("also answering plain http on the same port " +
+				"(--insecure-http): tokens from devices still using it cross " +
+				"the network readable by anyone on it")
+		}
+
 		// Here rather than in main, because only the invocation that listens
 		// holds an address worth giving up: `first-device` is over in a second
 		// and has no console watching it either way.
@@ -131,6 +172,12 @@ func main() {
 	// Who to stop with. A persistent flag on the root for the reason above, and
 	// passed only by a console that started this server as its own child — a
 	// unit's server is meant to outlive every window.
+	// Plain HTTP beside TLS, on the same port, for devices whose app cannot
+	// speak TLS yet. One transition release; see secureListener. Card 713.
+	app.RootCmd.PersistentFlags().BoolVar(&insecureHTTP, "insecure-http",
+		settings.InsecureHTTP,
+		"also answer plain http on the same port, for devices not yet updated")
+
 	app.RootCmd.PersistentFlags().IntVar(&supervisorPID, "supervisor-pid", 0,
 		"stop when this process is gone (0: nobody is supervising)")
 
@@ -316,6 +363,12 @@ func registerRoutes(e *core.ServeEvent) {
 	// requiring a credential to obtain a credential is the gap it exists to
 	// close. What it takes instead is proof of the code — see provision.go.
 	e.Router.POST("/join", handleJoin)
+	// What a signed join signs: issued to anybody, good once, for two
+	// minutes. Card 713; see join.go.
+	e.Router.GET("/join/nonce", handleJoinNonce)
+	// What happened to the account that its devices should hear about —
+	// a new device, a new recovery code, a wipe. Card 715; see events.go.
+	e.Router.GET("/events", handleEvents)
 	e.Router.GET("/devices", handleListDevices)
 	e.Router.POST("/revoke", handleRevoke)
 	e.Router.POST("/rename", handleRename)
@@ -728,7 +781,7 @@ type wipeRequest struct {
 }
 
 func handleWipe(e *core.RequestEvent) error {
-	accountID, _, err := authenticate(e)
+	accountID, deviceID, err := authenticate(e)
 	if err != nil {
 		return authFailed(e, err)
 	}
@@ -747,6 +800,13 @@ func handleWipe(e *core.RequestEvent) error {
 			"error":  err.Error(),
 			"result": result,
 		})
+	}
+	// After the wipe and outside its transaction, unlike an enrolment's line:
+	// a wipe already leaves a receipt every device reads, so a line that
+	// failed to write costs a notice and not the only trace. Card 715.
+	if err := recordEvent(e.App, accountID, eventWiped, deviceID,
+		deviceLabel(e.App, deviceID), ""); err != nil {
+		e.App.Logger().Error("could not record a wipe", "error", err)
 	}
 	return e.JSON(http.StatusOK, result)
 }
@@ -843,8 +903,19 @@ func registerCommands(app *pocketbase.PocketBase) {
 				log.Fatal(err)
 			}
 
+			// Made here if the server has never started, so the first device
+			// is told the fingerprint it will meet rather than finding out on
+			// first contact. The same file serve reads. Card 713.
+			_, fp, err := loadOrCreateCertificate(app.DataDir())
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			if asJSON {
-				encoded, _ := json.Marshal(device)
+				encoded, _ := json.Marshal(struct {
+					*Device
+					Fingerprint string `json:"fingerprint"`
+				}{device, fp})
 				// Straight to stdout, not through cobra: PocketBase points the
 				// command's writer at stderr, so `$(... --json)` in a script
 				// would capture nothing at all. --json exists for scripts, so
@@ -861,9 +932,13 @@ func registerCommands(app *pocketbase.PocketBase) {
 			cmd.Println("Account: " + device.AccountID)
 			cmd.Println("Device:  " + device.DeviceID + "  (" + device.Label + ")")
 			cmd.Println("Token:   " + device.Token)
+			cmd.Println("Certificate fingerprint (SHA-256):")
+			cmd.Println("  " + displayFingerprint(fp))
 			cmd.Println("──────────────────────────────────────────────")
 			cmd.Println()
-			cmd.Println("Paste the token into SummaReader on this device.")
+			cmd.Println("Paste the token into SummaReader on this device, with")
+			cmd.Println("the server's address starting https://. When the app")
+			cmd.Println("shows a fingerprint, check it against the one above.")
 			// True since card 714: the devices collection holds the token's
 			// hash, so not even this server can show it again.
 			cmd.Println("It is shown once and is not recoverable — the server")
@@ -892,9 +967,14 @@ type enrollRequest struct {
 }
 
 func handleEnroll(e *core.RequestEvent) error {
-	accountID, _, err := authenticate(e)
+	accountID, callerID, err := authenticate(e)
 	if err != nil {
 		return authFailed(e, err)
+	}
+	// Per account, so a stolen token cannot mint siblings faster than the
+	// owner's devices hear about them. Card 715.
+	if !enrolLimit.allow(accountID) {
+		return e.JSON(http.StatusTooManyRequests, rateLimitError)
 	}
 
 	var body enrollRequest
@@ -913,7 +993,7 @@ func handleEnroll(e *core.RequestEvent) error {
 		})
 	}
 
-	device, err := enrollDevice(e.App, accountID, label)
+	device, err := enrollAndTell(e.App, accountID, label, eventEnrolled, callerID)
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not enrol",
@@ -927,7 +1007,7 @@ type joinVerifierRequest struct {
 }
 
 func handleSetJoinVerifier(e *core.RequestEvent) error {
-	accountID, _, err := authenticate(e)
+	accountID, callerID, err := authenticate(e)
 	if err != nil {
 		return authFailed(e, err)
 	}
@@ -944,7 +1024,17 @@ func handleSetJoinVerifier(e *core.RequestEvent) error {
 		})
 	}
 
-	if err := setJoinVerifier(e.App, accountID, verifier); err != nil {
+	// With its line, in one transaction: a new code is a new way in, and a
+	// stolen token replacing it is exactly what the other devices should
+	// hear about. Card 715.
+	err = e.App.RunInTransaction(func(tx core.App) error {
+		if err := setJoinVerifier(tx, accountID, verifier); err != nil {
+			return err
+		}
+		return recordEvent(tx, accountID, eventRecovery, callerID,
+			deviceLabel(tx, callerID), "")
+	})
+	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not store",
 		})
@@ -952,9 +1042,14 @@ func handleSetJoinVerifier(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
+// Either a signed join — nonce, key, signature — or, for a code made before
+// card 713, the proof alone. See join.go.
 type joinRequest struct {
-	Proof string `json:"proof"`
-	Label string `json:"label"`
+	Proof     string `json:"proof"`
+	Nonce     string `json:"nonce"`
+	Key       string `json:"key"`
+	Signature string `json:"signature"`
+	Label     string `json:"label"`
 }
 
 func handleJoin(e *core.RequestEvent) error {
@@ -964,7 +1059,18 @@ func handleJoin(e *core.RequestEvent) error {
 		body.Label = "A new device"
 	}
 
-	device, err := joinDevice(e.App, body.Proof, body.Label)
+	var device *Device
+	var err error
+	if body.Key != "" {
+		device, err = joinDeviceSigned(e.App, body.Nonce, body.Key, body.Signature, body.Label)
+	} else {
+		device, err = joinDevice(e.App, body.Proof, body.Label)
+	}
+	if errors.Is(err, ErrRateLimited) {
+		// Only ever after the code was proved, so saying so tells a guesser
+		// nothing.
+		return e.JSON(http.StatusTooManyRequests, rateLimitError)
+	}
 	if err != nil {
 		// The same wording a bad token gets, and no touchDevice: a refused
 		// attempt must leave nothing behind, or the server keeps a record of
@@ -1125,7 +1231,10 @@ func handleOperatorEnroll(e *core.RequestEvent) error {
 			"error": "could not enrol",
 		})
 	}
-	device, err := enrollDevice(e.App, account, label)
+	// Not rate-limited — the operator owns the machine — but told to the
+	// devices all the same: a device they did not expect is news whoever
+	// added it. Card 715.
+	device, err := enrollAndTell(e.App, account, label, eventEnrolled, "operator")
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "could not enrol",

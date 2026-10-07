@@ -36,6 +36,9 @@ func ensureSchema(app core.App) error {
 	if err := ensureDevices(app); err != nil {
 		return err
 	}
+	if err := ensureEvents(app); err != nil {
+		return err
+	}
 	if err := ensureInstanceId(app); err != nil {
 		return err
 	}

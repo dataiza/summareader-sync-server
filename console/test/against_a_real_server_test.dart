@@ -55,6 +55,10 @@ void main() {
     final overview = await _eventually(server.overview);
 
     expect(overview, isNotNull, reason: 'the server never answered /overview');
+    // Card 713: the server made its certificate on first start, and the
+    // answer above came over https pinned to it — a plain request to a
+    // server that is TLS-only is refused, so there was no other way in.
+    expect(server.fingerprint, isNotNull);
     expect(overview!['devices'], isEmpty);
 
     final metrics = await server.metrics();

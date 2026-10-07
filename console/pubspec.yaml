@@ -25,6 +25,11 @@ dependencies:
   # implementations.
   http: ^1.2.0
 
+  # SHA-256 of the server's certificate, which is what this console pins its
+  # own connections to and what it shows for a device's owner to compare.
+  # Card 713. Dart's own libraries have no hash function.
+  crypto: ^3.0.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -49,7 +49,11 @@ func announce(addr, instance string) func() {
 		// What a client learns before connecting. Deliberately nothing about
 		// the data: this is broadcast to every machine on the network, so it
 		// carries what is needed to reach the server and not one field more.
-		[]string{"software=summareader-sync-server"},
+		//
+		// The scheme since card 713: every connection is TLS now, and a
+		// device that found this server and spoke plain HTTP to it would be
+		// refused. Its absence is how an older server says http.
+		[]string{"software=summareader-sync-server", "scheme=https"},
 		nil,
 	)
 	if err != nil {

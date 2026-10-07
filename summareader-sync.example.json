@@ -7,5 +7,7 @@
   "_metrics_token": "The credential a scraper presents to /metrics, as `Authorization: Bearer …`. Empty means the endpoint 404s, which is the default and the right answer for a server nobody is monitoring. Any long random string: openssl rand -hex 24. Also SUMMAREADER_METRICS_TOKEN. The desktop console never writes this — see RUNNING.md for why.",
   "metrics_token": "",
   "_no_announce": "Do not advertise this server on the local network. Also --no-announce and SUMMAREADER_NO_ANNOUNCE. The announcement is only ever a convenience — the address works either way.",
-  "no_announce": false
+  "no_announce": false,
+  "_insecure_http": "Also answer plain HTTP beside HTTPS on the same port, for devices whose app predates encrypted sync. Also --insecure-http and SUMMAREADER_INSECURE_HTTP. Tokens from those devices cross the network readable by anyone on it, so take it off once every device is updated; it is there for one release only. See RUNNING.md, Moving an existing server to HTTPS.",
+  "insecure_http": false
 }

@@ -15,8 +15,18 @@ import 'dart:convert';
 /// whether it is the one that carries a key. The app reads both spellings, so
 /// an older phone scanning this still pairs; a version older than that reads
 /// neither and says the code is not one it knows, which is the honest answer.
-String pairingPayload(String serverUrl, String token) =>
-    jsonEncode({'version': 2, 'server': serverUrl, 'device_token': token});
+///
+/// The fingerprint since card 713: the SHA-256 of the server's certificate,
+/// which the app pins and trusts instead of any authority. Still version 2,
+/// because an app that does not know the field ignores it and then refuses
+/// the certificate on its own — it fails closed, and sends nothing.
+String pairingPayload(String serverUrl, String token, {String? fingerprint}) =>
+    jsonEncode({
+      'version': 2,
+      'server': serverUrl,
+      'device_token': token,
+      'server_fingerprint': ?fingerprint,
+    });
 
 /// The whole difference between the two questions the pairing button can be
 /// asked.

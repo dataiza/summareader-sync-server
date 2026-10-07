@@ -134,16 +134,20 @@ List<LanAddr> pairingHosts(String addr, List<LanAddr> lan) {
 ///
 /// Empty when there is nothing a phone could reach, which the dialog says out
 /// loud. A code that silently cannot work is worse than no code.
-String reachableUrl(String addr, List<LanAddr> lan) {
+///
+/// [secure] for a server with a certificate, which since card 713 is every
+/// one started by a current binary.
+String reachableUrl(String addr, List<LanAddr> lan, {bool secure = false}) {
   final (host, port) = splitBind(addr);
   if (host.isEmpty || port.isEmpty) return '';
+  final scheme = secure ? 'https' : 'http';
 
   final ip = InternetAddress.tryParse(host);
-  if (ip == null) return 'http://$host:$port';
-  if (!ip.isLoopback && !_unspecified(ip)) return 'http://$host:$port';
+  if (ip == null) return '$scheme://$host:$port';
+  if (!ip.isLoopback && !_unspecified(ip)) return '$scheme://$host:$port';
 
   if (lan.isEmpty) return '';
-  return 'http://${lan.first.ip}:$port';
+  return '$scheme://${lan.first.ip}:$port';
 }
 
 /// 0.0.0.0 and ::, which mean "every interface" and name none of them.

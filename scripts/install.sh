@@ -65,11 +65,13 @@ if [ "${1:-}" = "--docker" ]; then
 
   # Its own healthcheck already asks this; asking once here is the difference
   # between a script that started something and a script that saw it answer.
+  # -k because the certificate is the server's own (card 713) and this only
+  # asks whether something answers; no token goes with it.
   for _ in $(seq 30); do
-    curl -fsS "http://$addr/instance" >/dev/null 2>&1 && break
+    curl -fsSk "https://$addr/instance" >/dev/null 2>&1 && break
     sleep 1
   done
-  curl -fsS "http://$addr/instance" >/dev/null 2>&1 \
+  curl -fsSk "https://$addr/instance" >/dev/null 2>&1 \
     && echo "answering on $addr" \
     || { echo "did not answer on $addr — docker compose logs" >&2; exit 1; }
 

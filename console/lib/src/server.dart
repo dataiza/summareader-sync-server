@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 import 'addresses.dart';
 import 'service.dart';
 
@@ -48,6 +50,54 @@ class FirstDevice {
   final String accountId;
   final String deviceId;
   final String token;
+}
+
+/// The server's certificate, beside its database. The server makes it on its
+/// first start; see tls.go. Card 713.
+const certFile = 'tls-cert.pem';
+
+/// The SHA-256 of the certificate the server in [dir] serves, in lowercase
+/// hex, or null when there is none yet.
+///
+/// Read from the file rather than learned from the server, because this
+/// console runs on the same machine and the file is the ground truth: a
+/// fingerprint taken off the network would be trusting the very connection
+/// it exists to check. Null means a server that has never started, or one
+/// from before certificates, and this console then speaks plain HTTP to it.
+String? certificateFingerprint(String dir) {
+  try {
+    final pem = File('$dir/$certFile').readAsStringSync();
+    final body = pem
+        .split('\n')
+        .where((line) => line.isNotEmpty && !line.startsWith('-----'))
+        .join();
+    return sha256.convert(base64.decode(body.trim())).toString();
+  } on FileSystemException {
+    return null;
+  } on FormatException {
+    return null;
+  }
+}
+
+/// The same value for a person to compare against what a device shows: upper
+/// case, in pairs.
+String displayFingerprint(String fingerprint) {
+  final upper = fingerprint.toUpperCase();
+  return [
+    for (var i = 0; i + 1 < upper.length; i += 2) upper.substring(i, i + 2),
+  ].join(':');
+}
+
+/// A client that accepts exactly the certificate whose fingerprint is
+/// [fingerprint], and trusts no authority for anything else. Plain when there
+/// is no fingerprint, for a server that predates certificates.
+HttpClient pinnedClient(String? fingerprint) {
+  final client = fingerprint == null
+      ? HttpClient()
+      : (HttpClient(context: SecurityContext(withTrustedRoots: false))
+          ..badCertificateCallback = (cert, host, port) =>
+              sha256.convert(cert.der).toString() == fingerprint);
+  return client..connectionTimeout = const Duration(seconds: 2);
 }
 
 /// The server binary this console supervises.
@@ -129,6 +179,21 @@ class SyncServer {
   Future<bool> get running async =>
       managed ? await serviceActive() : _childRunning;
 
+  /// What the server's certificate hashes to, read afresh each time: the
+  /// server writes it on its first start, which may be after this console
+  /// opened. See [certificateFingerprint].
+  String? get fingerprint => certificateFingerprint(dir);
+
+  /// Where a request goes, and over what. https and pinned once the server
+  /// has a certificate; plain only for one that has none.
+  (HttpClient, Uri) _connect(String path) {
+    final pin = fingerprint;
+    return (
+      pinnedClient(pin),
+      Uri.parse('${pin == null ? 'http' : 'https'}://$addr$path'),
+    );
+  }
+
   /// Whether something is already answering on this address.
   ///
   /// [running] only knows about servers this console has a handle on — its own
@@ -209,9 +274,9 @@ class SyncServer {
   Future<String?> metrics() async => _text('/metrics');
 
   Future<String?> _text(String path) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    final (client, url) = _connect(path);
     try {
-      final request = await client.getUrl(Uri.parse('http://$addr$path'));
+      final request = await client.getUrl(url);
       request.headers.set('Authorization', 'Bearer ${tokens.metrics}');
       final response = await request.close().timeout(
         const Duration(seconds: 2),
@@ -276,9 +341,9 @@ class SyncServer {
     String path,
     Map<String, String> body,
   ) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    final (client, url) = _connect(path);
     try {
-      final request = await client.postUrl(Uri.parse('http://$addr$path'));
+      final request = await client.postUrl(url);
       request.headers.set('Authorization', 'Bearer ${tokens.operator}');
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
@@ -297,9 +362,9 @@ class SyncServer {
 
   /// Null when it worked, otherwise a sentence to show.
   Future<String?> _post(String path, Map<String, String> body) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    final (client, url) = _connect(path);
     try {
-      final request = await client.postUrl(Uri.parse('http://$addr$path'));
+      final request = await client.postUrl(url);
       request.headers.set('Authorization', 'Bearer ${tokens.operator}');
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
