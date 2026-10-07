@@ -30,8 +30,12 @@ id=sk.dataiza.summareader_sync_console
 # the point: the alternative is silently building with a tool nobody chose.
 #
 # When that happens, check what changed upstream and put the new hash here.
+# Last moved 2026-10-07, to the build the app's script has pinned since
+# 2026-10-04: upstream's CI rebuilt `continuous` from 854e19e, whose only new
+# change adds an APPIMAGETOOL_RUNTIME_FILE variable. The 1.0.0 release stopped
+# here.
 tool_url=https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-tool_sha=a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+tool_sha=95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
 tool="${APPIMAGETOOL:-${XDG_CACHE_HOME:-$HOME/.cache}/summareader/appimagetool}"
 
 if [ ! -x "$tool" ]; then
@@ -47,6 +51,30 @@ if [ "$got" != "$tool_sha" ]; then
   echo "  got      $got" >&2
   echo "Upstream rebuilt its rolling release. Check what changed, then update" >&2
   echo "tool_sha in $0 — or set APPIMAGETOOL to a build you trust." >&2
+  exit 1
+fi
+
+# The runtime too, by hash and from a dated release. Left to itself the pinned
+# appimagetool fetches the type2 runtime from upstream's moving `continuous`
+# release on every build, and that runtime is the ELF header of the AppImage —
+# the first code that runs when the console starts, and what its self-update
+# swaps in. The tool's pin did not cover it (card 711, as in the app).
+runtime_url=https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+runtime_sha=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+runtime="${APPIMAGE_RUNTIME:-${XDG_CACHE_HOME:-$HOME/.cache}/summareader/runtime-x86_64-20251108}"
+
+if [ ! -f "$runtime" ]; then
+  mkdir -p "$(dirname "$runtime")"
+  echo "Fetching the AppImage runtime…"
+  curl -fsSL -o "$runtime" "$runtime_url"
+fi
+got="$(sha256sum "$runtime" | cut -d' ' -f1)"
+if [ "$got" != "$runtime_sha" ]; then
+  echo "The AppImage runtime is not the pinned build." >&2
+  echo "  expected $runtime_sha" >&2
+  echo "  got      $got" >&2
+  echo "Delete $runtime to fetch it again, or set APPIMAGE_RUNTIME to a build" >&2
+  echo "you trust." >&2
   exit 1
 fi
 
@@ -126,6 +154,6 @@ install -m 644 "$app/usr/share/icons/hicolor/256x256/apps/$id.png" "$app/$id.png
 # directory and runs from there — slower by a second, works everywhere.
 rm -f "$out"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 VERSION="$version" \
-  "$tool" --no-appstream "$app" "$out" >/dev/null
+  "$tool" --no-appstream --runtime-file "$runtime" "$app" "$out" >/dev/null
 chmod 755 "$out"
 echo "  $(basename "$out")  $(du -h "$out" | cut -f1)"
