@@ -3,6 +3,14 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.1.0
+
+**The console reads the database once a minute, not all the time.** It asked the server for its statistics every 2 seconds, and each answer read the whole database: on a large library, gigabytes of disk reads, and devices syncing behind them. The server now computes the numbers at most once a minute and answers from them; the console asks every 30 seconds while its window is visible and says when the counts were taken. `/overview` gains `computed_at`, and `/metrics` a gauge for the same time.
+
+**Mac downloads.** The release now has the console as a signed and notarized `.dmg`, with the server inside it, and the headless Mac servers signed with a Developer ID, so a Mac opens them without a warning.
+
+**The console on TestFlight.** Each release also uploads the console to TestFlight for Mac. That build is sandboxed, and keeps its library in its own container.
+
 ## 1.0.2
 
 **The console can copy the whole pairing code.** Its pairing window showed the
