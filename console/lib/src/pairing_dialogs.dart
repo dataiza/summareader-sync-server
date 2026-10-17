@@ -230,9 +230,8 @@ class _TokenBodyState extends State<_TokenBody> {
                         PillButton(
                           label: 'Copy code',
                           icon: Icons.copy_all_outlined,
-                          onTap: () => Clipboard.setData(
-                            ClipboardData(text: payload),
-                          ),
+                          onTap: () =>
+                              Clipboard.setData(ClipboardData(text: payload)),
                         ),
                       PillButton(
                         label: 'Copy token',

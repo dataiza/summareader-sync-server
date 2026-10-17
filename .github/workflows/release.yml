@@ -242,7 +242,7 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
-    timeout-minutes: 75
+    timeout-minutes: 180
     env:
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
@@ -320,7 +320,7 @@ jobs:
           # and why, so it is printed on any answer but Accepted.
           notarize() {
             xcrun notarytool submit "$1" --key "$key" --key-id "$KEY_ID" \
-              --issuer "$ISSUER_ID" --wait --timeout 30m \
+              --issuer "$ISSUER_ID" --wait --timeout 60m \
               --output-format json >"$RUNNER_TEMP/notary.json"
             status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json")
             echo "$1: $status"

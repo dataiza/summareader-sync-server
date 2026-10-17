@@ -226,8 +226,11 @@ console)
     bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
     entitlements=build-macos/store.entitlements
     cp console/macos/Runner/Release.entitlements "$entitlements"
-    plutil -insert com.apple.application-identifier -string "$APPLE_TEAM_ID.$bundle_id" "$entitlements"
-    plutil -insert com.apple.developer.team-identifier -string "$APPLE_TEAM_ID" "$entitlements"
+    # PlistBuddy, not plutil: plutil reads the dots in these key names as a
+    # path through nested dictionaries and stops at "com". The first TestFlight
+    # upload, 1.1.0, failed exactly there.
+    /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $APPLE_TEAM_ID.$bundle_id" "$entitlements"
+    /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM_ID" "$entitlements"
 
     sign_frameworks "$app" --sign "$MACOS_STORE_IDENTITY"
     # Sandbox and inherit only, or the sandbox kills the server at launch.
