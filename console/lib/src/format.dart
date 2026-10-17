@@ -23,3 +23,11 @@ String plural(num n, String noun) {
 
 /// A byte count as the megabytes a person reads off a disk.
 String megabytes(int bytes) => '${(bytes / (1 << 20)).toStringAsFixed(1)} MB';
+
+/// A moment as the hours and minutes of the local clock, which is all "as of"
+/// needs: the counts it qualifies are at most a minute old.
+String clock(DateTime when) {
+  final local = when.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(local.hour)}:${two(local.minute)}';
+}

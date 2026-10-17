@@ -72,6 +72,33 @@ func TestOverviewCountsAndLists(t *testing.T) {
 	if !byLabel["Old phone"].Revoked {
 		t.Fatal("a revoked device must still be listed, and say so")
 	}
+	if out.ComputedAt == "" {
+		t.Fatal("the answer does not say when its counts were taken")
+	}
+
+	// The counts are cached for a minute; the device rows are not. A rename
+	// pressed in the console has to show on the very next answer.
+	record, err := app.FindRecordById(collDevices, busy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Set("label", "Renamed")
+	if err := app.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	again, err := collectOverview(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := false
+	for _, device := range again.Devices {
+		if device.ID == busy {
+			renamed = device.Label == "Renamed" && device.Entries == 4
+		}
+	}
+	if !renamed {
+		t.Fatal("a rename did not show until the cached counts expired")
+	}
 }
 
 func TestEveryServerHasAnIdentityOfItsOwn(t *testing.T) {

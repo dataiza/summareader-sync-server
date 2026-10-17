@@ -61,19 +61,23 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     with WidgetsBindingObserver {
   late SyncServer _server;
   late ConsoleState _state;
-  Timer? _poll;
+  late final _poll = Poll(() => unawaited(_refresh()));
+
+  /// The early second look after a refresh that found the server running but
+  /// not answering, see [_refresh].
+  Timer? _soon;
   final List<StreamSubscription<ProcessSignal>> _signals = [];
   List<LanAddr> _lan = const [];
   String? _compose;
 
   /// Which of the two a unit would run. Held here as well as read off the
   /// unit, because the choice can be made before the switch that installs one
-  /// is on — and a poll two seconds later would otherwise put it back.
+  /// is on — and the next poll would otherwise put it back.
   bool _docker = false;
 
   /// Whether opening this window starts the server. Held here as well as in
-  /// the file so the switch answers at once rather than two seconds later,
-  /// when the poll rebuilds the state.
+  /// the file so the switch answers at once rather than when the next poll
+  /// rebuilds the state.
   bool _autostart = false;
 
   /// What the server calls itself. Empty means it has never been named, and
@@ -184,7 +188,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     }
 
     unawaited(_refresh());
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _refresh());
+    _poll.start();
 
     // Once on launch and then daily, and only when it was switched on. A
     // server runs on a machine nobody looks at, so an update that waits to
@@ -197,7 +201,8 @@ class _ConsoleScreenState extends State<ConsoleScreen>
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _poll.stop();
+    _soon?.cancel();
     _autoUpdateTimer?.cancel();
     for (final signal in _signals) {
       unawaited(signal.cancel());
@@ -224,6 +229,10 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _poll.lifecycle(state);
+
+  @override
   Future<AppExitResponse> didRequestAppExit() async {
     await _stopWhatWeStarted();
     return AppExitResponse.exit;
@@ -245,6 +254,16 @@ class _ConsoleScreenState extends State<ConsoleScreen>
           ];
 
     if (!mounted) return;
+    // Running but not answering is nearly always a server that has just
+    // started and is not listening yet. Asked again only at the next poll, the
+    // window would show the old counts for half a minute after Start.
+    if (running && overview == null && _poll.active) {
+      _soon ??= Timer(const Duration(seconds: 2), () {
+        _soon = null;
+        unawaited(_refresh());
+      });
+    }
+
     setState(() {
       _lan = lan;
       _state = ConsoleState(
@@ -259,6 +278,9 @@ class _ConsoleScreenState extends State<ConsoleScreen>
             ? _state.entries
             : gauge(metrics, 'summareader_server_log_entries').round(),
         bytes: dirSize(_dir),
+        statsAt: overview == null
+            ? _state.statsAt
+            : DateTime.tryParse(overview['computed_at'] as String? ?? ''),
         paired: devices ?? _state.paired,
         hosts: bindHosts(splitBind(_server.addr).$1, lan),
         linux: Platform.isLinux,
@@ -271,7 +293,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         docker: serviceInstalled() ? serviceDocker() : _docker,
         compose: _compose != null,
         error: _state.error,
-        // Rebuilt here every two seconds, so anything left out of this list is
+        // Rebuilt here on every poll, so anything left out of this list is
         // a thing that shows at launch and disappears. Check for updates did
         // exactly that, and a download's progress line would do it twice a
         // second.
@@ -288,7 +310,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   }
 
   /// Reports what went wrong in the window rather than in a box that has to be
-  /// dismissed: this polls every two seconds and a modal stack of five
+  /// dismissed: this polls and a modal stack of five
   /// identical errors is not a report, it is an obstacle.
   void _fail(Object error) {
     if (!mounted) return;
@@ -1028,4 +1050,58 @@ String _id(String flag) {
   final result = Process.runSync('id', [flag]);
   final value = (result.stdout as String).trim();
   return value.isEmpty ? '0' : value;
+}
+
+/// How often the console asks the running server for its counts.
+///
+/// Thirty seconds, not the two it used to be. The server computes its counts
+/// at most once a minute (stats.go), so asking more often only re-reads the
+/// same answer, and every action that changes something here refreshes at
+/// once anyway.
+const pollEvery = Duration(seconds: 30);
+
+/// The console's periodic refresh, which runs only while the window can be
+/// seen.
+///
+/// A minimised or hidden window has nobody reading it, and each tick is two
+/// requests to the server and a walk of the data directory. Unfocused but
+/// visible ([AppLifecycleState.inactive]) still polls: a console left open on
+/// a second screen is being watched.
+class Poll {
+  Poll(this.tick, {this.every = pollEvery});
+
+  final void Function() tick;
+  final Duration every;
+  Timer? _timer;
+
+  /// Whether the periodic tick is running.
+  bool get active => _timer != null;
+
+  void start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(every, (_) => tick());
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// Follows the window: stops when it is hidden, and on coming back refreshes
+  /// once at once, because what is on screen is as old as the time it was
+  /// away.
+  void lifecycle(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+      case AppLifecycleState.inactive:
+        if (!active) {
+          tick();
+          start();
+        }
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        stop();
+    }
+  }
 }

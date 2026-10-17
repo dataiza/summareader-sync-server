@@ -57,68 +57,48 @@ func handleMetrics(e *core.RequestEvent) error {
 		}
 	}
 
-	count := func(collection string) float64 {
-		var total struct {
-			N float64 `db:"n"`
-		}
-		err := e.App.DB().NewQuery("SELECT COUNT(*) AS n FROM " + collection).
-			One(&total)
-		if err != nil {
-			return 0
-		}
-		return total.N
-	}
+	// The database half comes from the pass in stats.go, at most a minute
+	// old, so a scraper polling every 15 seconds costs no reading at all. The
+	// process half below is read live, because it costs nothing.
+	stats, err := statsFor(e.App)
+	if err == nil {
+		metric("summareader_server_accounts", "Accounts on this server.", "gauge",
+			map[string]float64{"": float64(stats.Accounts)})
+		metric("summareader_server_devices", "Devices enrolled, across accounts.",
+			"gauge", map[string]float64{"": float64(stats.Devices)})
+		metric("summareader_server_log_entries", "Entries in the sync log.",
+			"gauge", map[string]float64{"": float64(stats.Entries)})
+		metric("summareader_server_blobs", "Blobs held.", "gauge",
+			map[string]float64{"": float64(stats.Blobs)})
 
-	metric("summareader_server_accounts", "Accounts on this server.", "gauge",
-		map[string]float64{"": count(collAccounts)})
-	metric("summareader_server_devices", "Devices enrolled, across accounts.",
-		"gauge", map[string]float64{"": count(collDevices)})
-	metric("summareader_server_log_entries", "Entries in the sync log.",
-		"gauge", map[string]float64{"": count(collEntries)})
-	metric("summareader_server_blobs", "Blobs held.", "gauge",
-		map[string]float64{"": count(collBlobs)})
-
-	// What it all weighs. The payload is the encrypted body, so this is the
-	// number that decides whether a disk is big enough — the only size
-	// question the operator can answer without reading anything.
-	var bytes struct {
-		Entries float64 `db:"entries"`
-		Blobs   float64 `db:"blobs"`
-	}
-	if err := e.App.DB().NewQuery(
-		"SELECT (SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM " + collEntries +
-			") AS entries, (SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM " +
-			collBlobs + ") AS blobs",
-	).One(&bytes); err == nil {
+		// What it all weighs. The payload is the encrypted body, so this is the
+		// number that decides whether a disk is big enough — the only size
+		// question the operator can answer without reading anything.
 		metric("summareader_server_stored_bytes", "Ciphertext held, by kind.",
 			"gauge", map[string]float64{
-				`{kind="entries"}`: bytes.Entries,
-				`{kind="blobs"}`:   bytes.Blobs,
+				`{kind="entries"}`: float64(stats.EntryBytes),
+				`{kind="blobs"}`:   float64(stats.BlobBytes),
 			})
-	}
 
-	// Per account, because "the server is full" is never the useful form of
-	// that question — "which library grew" is.
-	var perAccount []struct {
-		Account string  `db:"account"`
-		N       float64 `db:"n"`
-		Bytes   float64 `db:"bytes"`
-	}
-	if err := e.App.DB().NewQuery(
-		"SELECT account, COUNT(*) AS n, COALESCE(SUM(LENGTH(payload)), 0) AS bytes " +
-			"FROM " + collEntries + " GROUP BY account",
-	).All(&perAccount); err == nil {
+		// Per account, because "the server is full" is never the useful form of
+		// that question — "which library grew" is.
 		entries := map[string]float64{}
 		size := map[string]float64{}
-		for _, row := range perAccount {
-			label := fmt.Sprintf("{account=%q}", row.Account)
-			entries[label] = row.N
-			size[label] = row.Bytes
+		for account, n := range stats.AccountEntries {
+			label := fmt.Sprintf("{account=%q}", account)
+			entries[label] = float64(n)
+			size[label] = float64(stats.AccountBytes[account])
 		}
 		metric("summareader_server_account_entries", "Log entries per account.",
 			"gauge", entries)
 		metric("summareader_server_account_bytes", "Ciphertext per account.",
 			"gauge", size)
+
+		// When the numbers above were taken, so a dashboard can tell a flat
+		// line from a cache that stopped refreshing.
+		metric("summareader_server_stats_computed_timestamp_seconds",
+			"When the database counts were last computed.", "gauge",
+			map[string]float64{"": float64(stats.ComputedAt.Unix())})
 	}
 
 	// The process. Standard names, because every dashboard written for a Go
@@ -136,7 +116,7 @@ func handleMetrics(e *core.RequestEvent) error {
 
 	e.Response.Header().Set("Content-Type",
 		"text/plain; version=0.0.4; charset=utf-8")
-	_, err := e.Response.Write([]byte(out.String()))
+	_, err = e.Response.Write([]byte(out.String()))
 	return err
 }
 

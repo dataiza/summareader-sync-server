@@ -504,6 +504,20 @@ Accounts, devices, log entries, blobs, bytes held — in total and per account,
 because "the server is full" is never the useful form of that question. Plus
 memory, goroutines and uptime.
 
+**The database counts are at most a minute old.** Counting reads the log, so
+the server does it in one pass at most once a minute, never two at once, and
+both `/overview` and `/metrics` answer from the last pass: a scraper polling
+every 15 seconds and an open console cost no extra reading. The first request
+after start waits for the first pass; after that a request that finds the
+counts older than a minute gets them at once and starts the next pass behind
+itself. `/overview` says when they were taken in `computed_at` (RFC 3339, UTC)
+and `/metrics` in `summareader_server_stats_computed_timestamp_seconds`. The
+device rows in `/overview` (label, revoked, last seen) are read on every
+request, so a rename or a revoke shows at once; only each device's entry count
+comes from the pass. The console asks every 30 seconds while its window is on
+screen, not while it is minimised or hidden, and its counts line ends with
+"counts as of" the time of the pass.
+
 **A monitoring system does not get a device token.** One credential that can
 both scrape and read the log is a monitoring system that has the library, so
 this is its own secret. Everything reported is a count, a byte total or an age:

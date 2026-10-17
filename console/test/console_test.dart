@@ -27,6 +27,7 @@ void main() {
   _deviceControls();
   _startingWithTheWindow();
   _serverIssuedCode();
+  _polling();
 
   // The unit file is written by the console and read by systemd, and nothing
   // in between ever looks at it. A wrong ExecStart is a service that fails at
@@ -567,6 +568,71 @@ void _deviceControls() {
       // Whichever state it is in: a device worth forgetting is usually one
       // that was stopped first.
       expect(find.text('Remove'), findsOneWidget);
+    });
+  });
+}
+
+// Card 953: the console asked for the server's counts every two seconds, and
+// every answer read the whole database. It now asks every thirty, only while
+// the window can be seen, and says how old the counts are.
+void _polling() {
+  group('polling', () {
+    testWidgets('it ticks every thirty seconds, not every two', (tester) async {
+      var ticks = 0;
+      final poll = Poll(() => ticks++)..start();
+
+      await tester.pump(const Duration(seconds: 29));
+      expect(ticks, 0);
+      await tester.pump(const Duration(seconds: 1));
+      expect(ticks, 1);
+      await tester.pump(const Duration(seconds: 60));
+      expect(ticks, 3);
+      // Stopped here, not in a tear-down: the pending-timer check runs first.
+      poll.stop();
+    });
+
+    testWidgets(
+      'it stops while the window is hidden and catches up on return',
+      (tester) async {
+        var ticks = 0;
+        final poll = Poll(() => ticks++)..start();
+
+        // Unfocused but still on screen keeps polling.
+        poll.lifecycle(AppLifecycleState.inactive);
+        await tester.pump(pollEvery);
+        expect(ticks, 1);
+
+        poll.lifecycle(AppLifecycleState.hidden);
+        expect(poll.active, isFalse);
+        await tester.pump(pollEvery * 4);
+        expect(ticks, 1, reason: 'a minimised window polled');
+
+        // Back on screen: one refresh at once, then the interval again.
+        poll.lifecycle(AppLifecycleState.inactive);
+        expect(ticks, 2);
+        poll.lifecycle(AppLifecycleState.resumed);
+        expect(ticks, 2, reason: 'inactive to resumed is not a second return');
+        await tester.pump(pollEvery);
+        expect(ticks, 3);
+        poll.stop();
+      },
+    );
+
+    test('the counts line says when the counts were taken', () {
+      final state = ConsoleState(
+        dir: '/data',
+        addr: '127.0.0.1:8099',
+        devices: 2,
+        entries: 5,
+        statsAt: DateTime(2026, 10, 17, 9, 5),
+      );
+      expect(
+        state.countsLine,
+        '2 devices · 5 entries · 0.0 MB · counts as of 09:05',
+      );
+      // Carried through the one-field copies, or the first error would
+      // drop it until the next poll.
+      expect(state.withError('x').statsAt, state.statsAt);
     });
   });
 }

@@ -27,12 +27,15 @@ import (
 // plaintext bookkeeping the server writes itself, and none of it about what
 // any entry says.
 type overview struct {
-	Accounts int64            `json:"accounts"`
-	Entries  int64            `json:"entries"`
-	Blobs    int64            `json:"blobs"`
-	Bytes    int64            `json:"bytes"`
-	Uptime   float64          `json:"uptime_seconds"`
-	Devices  []overviewDevice `json:"devices"`
+	Accounts int64   `json:"accounts"`
+	Entries  int64   `json:"entries"`
+	Blobs    int64   `json:"blobs"`
+	Bytes    int64   `json:"bytes"`
+	Uptime   float64 `json:"uptime_seconds"`
+	// When the counts above were taken, in RFC 3339 UTC. They are computed at
+	// most once a minute (see stats.go), so the console says "as of" this.
+	ComputedAt string           `json:"computed_at"`
+	Devices    []overviewDevice `json:"devices"`
 }
 
 // One paired device, as the operator's window shows it.
@@ -75,47 +78,36 @@ func handleOverview(e *core.RequestEvent) error {
 
 // collectOverview is the whole of the reading, kept out of the handler so a
 // test can call it without standing up a router.
+//
+// The totals and the per-device entry counts come from the cached pass in
+// stats.go, so they can be up to a minute old and ComputedAt says how old. The
+// device rows are read here, on every request: they are a handful of small
+// rows, and a device just renamed or revoked must show the change at once.
 func collectOverview(app core.App) (overview, error) {
 	out := overview{Uptime: time.Since(started).Seconds(), Devices: []overviewDevice{}}
 
-	var totals struct {
-		Accounts int64 `db:"accounts"`
-		Entries  int64 `db:"entries"`
-		Blobs    int64 `db:"blobs"`
-		Bytes    int64 `db:"bytes"`
-	}
-	// One query rather than five round-trips through the same file: this runs
-	// every couple of seconds behind an open window.
-	err := app.DB().NewQuery(
-		"SELECT (SELECT COUNT(*) FROM " + collAccounts + ") AS accounts," +
-			" (SELECT COUNT(*) FROM " + collEntries + ") AS entries," +
-			" (SELECT COUNT(*) FROM " + collBlobs + ") AS blobs," +
-			" (SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM " + collEntries +
-			") AS bytes",
-	).One(&totals)
+	stats, err := statsFor(app)
 	if err != nil {
 		return out, err
 	}
-	out.Accounts, out.Entries = totals.Accounts, totals.Entries
-	out.Blobs, out.Bytes = totals.Blobs, totals.Bytes
+	out.Accounts, out.Entries = stats.Accounts, stats.Entries
+	out.Blobs, out.Bytes = stats.Blobs, stats.EntryBytes
+	out.ComputedAt = stats.ComputedAt.UTC().Format(time.RFC3339)
 
-	// Left join, so a device that has never sent anything is still in the
-	// list. That device is the interesting one: it is either brand new or it
-	// is not getting through, and leaving it out would hide both.
+	// Every device, including one that has never sent anything. That device
+	// is the interesting one: it is either brand new or it is not getting
+	// through, and leaving it out would hide both.
 	var rows []struct {
 		ID       string `db:"id"`
 		Label    string `db:"label"`
 		Account  string `db:"account"`
 		Revoked  bool   `db:"revoked"`
 		LastSeen string `db:"last_seen"`
-		Entries  int64  `db:"entries"`
 	}
 	err = app.DB().NewQuery(
-		"SELECT d.id AS id, COALESCE(d.label, '') AS label, d.account AS account," +
-			" d.revoked AS revoked, COALESCE(d.last_seen, '') AS last_seen," +
-			" COUNT(e.id) AS entries" +
-			" FROM " + collDevices + " d LEFT JOIN " + collEntries + " e" +
-			" ON e.device = d.id GROUP BY d.id ORDER BY d.label, d.id",
+		"SELECT id, COALESCE(label, '') AS label, account, revoked," +
+			" COALESCE(last_seen, '') AS last_seen" +
+			" FROM " + collDevices + " ORDER BY label, id",
 	).All(&rows)
 	if err != nil {
 		return out, err
@@ -127,7 +119,7 @@ func collectOverview(app core.App) (overview, error) {
 			Account:  row.Account,
 			Revoked:  row.Revoked,
 			LastSeen: row.LastSeen,
-			Entries:  row.Entries,
+			Entries:  stats.DeviceEntries[row.ID],
 		})
 	}
 	return out, nil
