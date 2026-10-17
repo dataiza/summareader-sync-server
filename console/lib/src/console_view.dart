@@ -27,6 +27,7 @@ class ConsoleState {
     this.devices = 0,
     this.entries = 0,
     this.bytes = 0,
+    this.statsAt,
     this.paired = const [],
     this.hosts = const [],
     this.atLogin = false,
@@ -87,6 +88,12 @@ class ConsoleState {
   final int devices;
   final int entries;
   final int bytes;
+
+  /// When the server last computed [devices], [entries] and each device's
+  /// count, or null before the first answer. The server computes them at most
+  /// once a minute, so the line under the status says how old they are.
+  final DateTime? statsAt;
+
   final List<PairedDevice> paired;
 
   /// The addresses the bind chooser offers, already in the order it offers
@@ -173,6 +180,7 @@ class ConsoleState {
     devices: devices,
     entries: entries,
     bytes: bytes,
+    statsAt: statsAt,
     paired: paired,
     hosts: hosts,
     atLogin: atLogin,
@@ -202,7 +210,8 @@ class ConsoleState {
 
   String get countsLine =>
       '${plural(devices, 'device')} · ${plural(entries, 'entry')} · '
-      '${megabytes(bytes)}';
+      '${megabytes(bytes)}'
+      '${statsAt == null ? '' : ' · counts as of ${clock(statsAt!)}'}';
 }
 
 /// The console's body: Status and Devices, with everything that is set rather

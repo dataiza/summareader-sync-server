@@ -265,7 +265,7 @@ class SyncServer {
   /// paired device.
   ///
   /// Null when it is not up or will not answer. Errors are silence rather than
-  /// a dialog: this runs every couple of seconds, and a server that is down is
+  /// a dialog: this runs on every poll, and a server that is down is
   /// already saying so on the line above.
   Future<Map<String, dynamic>?> overview() async => _get('/overview');
 

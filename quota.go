@@ -80,7 +80,7 @@ func usageFor(app core.App, accountID string) (int64, error) {
 			Total *int64 `db:"total"`
 		}
 		err := app.DB().
-			Select("COALESCE(SUM(LENGTH(payload)), 0) AS total").
+			Select("COALESCE(SUM(octet_length(payload)), 0) AS total").
 			From(collection).
 			Where(dbx.HashExp{"account": accountID}).
 			One(&result)
