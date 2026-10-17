@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- For the server binary bundled in Contents/MacOS, in the App Store
+	     build only. A sandboxed app may start another executable only when it
+	     is inside the bundle and signed with exactly these two keys: the
+	     sandbox, and the instruction to take on the app's own sandbox rather
+	     than define one. Any other key here and the child is killed at launch.
+	     The server then has the app's network access and the app's container
+	     as its home, which is where its data directory lands.
+
+	     Not used for the Developer ID download, which is not sandboxed. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.inherit</key>
+	<true/>
+</dict>
+</plist>

@@ -39,8 +39,17 @@ the file. Nothing is checked until you press it.
 It needs FUSE to mount itself, which every desktop has; if yours does not, run
 it with `--appimage-extract-and-run`, or take the tarball.
 
+On a Mac, take `SummaReaderSync-*.dmg` when the release has one: open it and
+drag the app to Applications. It is signed and notarized, carries its own
+server, and keeps its library where a headless server on the same Mac does
+(`~/Library/Application Support/summareader-sync`). It does not update itself;
+download the next one. Releases made without the signing keys have no `.dmg`.
+
 Headless bundles are built for `linux-amd64`, `linux-arm64`, `darwin-amd64`,
-`darwin-arm64` and `windows-amd64`. Neither kind needs this repository.
+`darwin-arm64` and `windows-amd64`. The darwin binaries are signed and
+notarized when the release's Mac job ran, so a Mac starts them without a
+warning (it checks with Apple online the first time). Neither kind needs this
+repository.
 
 ### Headless bundle — systemd user service (Linux)
 

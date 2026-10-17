@@ -59,18 +59,25 @@ flutter run -d linux            # from source, while working on it
 flutter build linux --release   # into build/linux/x64/release/bundle
 ```
 
-Honest about the state: **the console has been built and run on Linux only.**
-The `linux`, `windows` and `macos` scaffolding is committed and the code has no
-platform-specific parts, but neither of those is the same as having run it.
-Nothing produces the other two yet — a window needs a toolchain per platform,
-and that means either a runner each or a cross setup, and there is neither.
-The one deliberately Linux-only thing is "Start at login", which writes a
-systemd user unit; the row is absent elsewhere.
+Linux and macOS are built by the release workflow; Windows scaffolding is
+committed and nothing builds it. The one deliberately Linux-only thing is
+"Start at login", which writes a systemd user unit; the row is absent
+elsewhere, a Mac included.
 
-**The console finds the server binary rather than containing one**:
-`SUMMAREADER_SYNC_BIN` if it is set, else a `summareader-sync` beside the
-console itself, else one on `PATH`. Nothing packages the two together yet, so
-on a machine built from this repository, point the variable at `dist/`. When
+On a Mac, `scripts/package-release.sh console macos` makes the `.dmg`: the
+console with a universal server binary inside it at `Contents/MacOS`, signed
+with Developer ID and the hardened runtime when `MACOS_SIGN_IDENTITY` is set
+(ad-hoc otherwise), not sandboxed. `console macos-store` makes the App Store
+package: sandboxed (`Release.entitlements`), the server signed as a helper
+that inherits the sandbox (`Helper.entitlements`), and so a data directory
+inside the app's container, which the console says when it finds no library
+there. The release workflow notarizes the first and uploads the second to
+TestFlight.
+
+**The console finds the server binary**: `SUMMAREADER_SYNC_BIN` if it is set,
+else a `summareader-sync` beside the console itself (where every package puts
+it), else one on `PATH`. On a machine built from this repository, point the
+variable at `dist/`. When
 there is no server binary anywhere, the console says so in its status line
 instead of offering a Start button that quietly does nothing.
 
