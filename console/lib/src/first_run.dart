@@ -40,6 +40,13 @@ Future<String?> askWhereTheLibraryGoes(
             'it, and nothing here can read what it holds.',
             style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
           ),
+          if (sandboxNote(proposed) case final note?) ...[
+            const SizedBox(height: 10),
+            Text(
+              note,
+              style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+            ),
+          ],
           const SizedBox(height: 14),
           ArField(controller: controller, background: Ar.neutral100),
           const SizedBox(height: 10),
@@ -163,6 +170,27 @@ Future<bool> emptyLibrary(String dir) async {
 
 /// Whether [dir] already holds a library.
 bool holdsALibrary(String dir) => File('$dir/data.db').existsSync();
+
+/// What the App Store build says when it finds no library, or null.
+///
+/// That build is sandboxed, so macOS gives it a home inside its own container
+/// and the default directory lands there. A server somebody downloaded and ran
+/// before keeps its library in ~/Library/Application Support, which this copy
+/// cannot open — so an empty window here is not a lost library, and has to
+/// say so before somebody pairs every device again looking for it.
+///
+/// `APP_SANDBOX_CONTAINER_ID` is set by macOS in every sandboxed process and
+/// in no other, which makes it the test for "this is the App Store build".
+/// [environment] is a parameter so a test can state a machine.
+String? sandboxNote(String dir, [Map<String, String>? environment]) {
+  final env = environment ?? Platform.environment;
+  if ((env['APP_SANDBOX_CONTAINER_ID'] ?? '').isEmpty) return null;
+  if (holdsALibrary(dir)) return null;
+  return 'This copy is from the App Store, and macOS keeps it inside its own '
+      'container: its library goes in $dir. A server you downloaded and ran '
+      'yourself keeps its library elsewhere, and this copy cannot reach it. '
+      'Pair your devices with this one, or keep using the other.';
+}
 
 /// Whether to put the console in the applications menu, asked once.
 ///

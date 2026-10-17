@@ -28,5 +28,28 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- The name Finder and the Dock show. PRODUCT_NAME stays the Flutter
+	     package's name, because the project file and the test host are
+	     spelled with it. -->
+	<key>CFBundleDisplayName</key>
+	<string>SummaReader Sync</string>
+	<!-- App Store Connect refuses a Mac package without a category, and says
+	     only that the key is missing. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<!-- TLS through the standard libraries only, which is exempt. Without
+	     the key every TestFlight build waits on the export-compliance
+	     question in App Store Connect before any tester can install it. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<!-- The bundled server announces itself over mDNS. Since macOS 15 the
+	     local network is a permission, and an app that advertises a Bonjour
+	     type must name it here and say why, or the advertisement is dropped. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_summareader-sync._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The sync server announces itself on your network so your devices can find it without typing its address.</string>
 </dict>
 </plist>

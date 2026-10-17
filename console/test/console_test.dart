@@ -577,9 +577,9 @@ void _serverIssuedCode() {
       // The server has never held a key and cannot put one in. What it can do
       // is save somebody typing an address and a token, which is exactly what
       // the app accepts a keyless code for.
-      final decoded = jsonDecode(
-        pairingPayload('http://10.0.0.2:8099', 'a-token'),
-      ) as Map<String, dynamic>;
+      final decoded =
+          jsonDecode(pairingPayload('http://10.0.0.2:8099', 'a-token'))
+              as Map<String, dynamic>;
 
       expect(decoded['server'], 'http://10.0.0.2:8099');
       expect(decoded['device_token'], 'a-token');
@@ -1005,6 +1005,33 @@ void _theTwoPages() {
       expect(asked?.version, '9.9.9');
     });
 
+    testWidgets('a Mac is not offered a systemd service', (tester) async {
+      // systemd is Linux. A Mac starts things at login through launchd, which
+      // this console does not write, so the switch would write a unit nothing
+      // ever reads.
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ConsoleView(
+              state: ConsoleState(
+                dir: '/data',
+                addr: '127.0.0.1:8099',
+                serverBinary: '/Applications/SummaReader Sync.app/x',
+                linux: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Configuration'));
+      await tester.pumpAndSettle();
+      await tester.tap(configPill('When it starts'));
+      await tester.pumpAndSettle();
+      expect(find.text('Start at login'), findsNothing);
+      expect(find.text('Keep it running'), findsNothing);
+      expect(find.text('Start when this opens'), findsOneWidget);
+    });
+
     testWidgets('an AppImage is not offered a service it cannot write', (
       tester,
     ) async {
@@ -1128,8 +1155,9 @@ void _whereThingsAre() {
       // on the next start.
       final fallback = defaultDataDir(env());
       Directory(fallback).createSync(recursive: true);
-      File('$fallback/$configName')
-          .writeAsStringSync('{"dir": "/srv/elsewhere"}');
+      File(
+        '$fallback/$configName',
+      ).writeAsStringSync('{"dir": "/srv/elsewhere"}');
 
       final where = resolveDirs(const [], env());
       expect(
@@ -1149,6 +1177,17 @@ void _theFirstRun() {
 
     setUp(() => dir = Directory.systemTemp.createTempSync('console-first'));
     tearDown(() => dir.deleteSync(recursive: true));
+
+    test('the App Store build says why it finds no library', () {
+      // Sandboxed, so its library is in its container and a library a
+      // downloaded server kept elsewhere is out of reach. Said only there,
+      // and only while there is nothing in the directory.
+      const sandboxed = {'APP_SANDBOX_CONTAINER_ID': 'sk.example'};
+      expect(sandboxNote(dir.path, const {}), isNull);
+      expect(sandboxNote(dir.path, sandboxed), contains(dir.path));
+      File('${dir.path}/data.db').writeAsStringSync('');
+      expect(sandboxNote(dir.path, sandboxed), isNull);
+    });
 
     test('nothing said means nothing chosen', () {
       final env = {

@@ -221,12 +221,364 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" out/* \
             --repo "$GITHUB_REPOSITORY" --clobber
 
+  # The Mac download (card 947): the console as a notarized .dmg, and the two
+  # darwin headless bundles again with their binaries signed and notarized.
+  #
+  # Optional, all of it. Without the signing secrets this builds and signs
+  # nothing, says so in a notice, and uploads nothing; when any step fails the
+  # job is red and Publish goes ahead without it. A Mac that cannot have the
+  # download is better served by a release than by no release.
+  #
+  # Notarized but not stapled, the darwin binaries: a ticket cannot be stapled
+  # to a bare Mach-O, so Gatekeeper asks Apple online the first time one runs.
+  # The tarballs keep their names and replace the unsigned ones the headless
+  # job uploaded — which is why this waits for that job.
+  macos:
+    name: Mac download
+    needs: [open, headless]
+    # Hosted, never self-hosted: this repository is public, and a fork's pull
+    # request that edited a workflow onto a self-hosted label would run its
+    # code on that machine, next to the signing keys.
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    timeout-minutes: 75
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: false
+
+      - name: Signing, or a notice that there is none
+        id: signing
+        env:
+          MACOS_DEVID_CERT_P12: ${{ secrets.MACOS_DEVID_CERT_P12 }}
+          MACOS_DEVID_CERT_PASSWORD: ${{ secrets.MACOS_DEVID_CERT_PASSWORD }}
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          APPSTORE_KEY_ID: ${{ vars.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for need in MACOS_DEVID_CERT_P12 MACOS_DEVID_CERT_PASSWORD \
+            APPSTORE_API_KEY_P8 APPSTORE_KEY_ID APPSTORE_ISSUER_ID; do
+            [ -n "${!need}" ] || missing="$missing $need"
+          done
+          if [ -n "$missing" ]; then
+            # A notice and not an error: signed or not, the rest of the
+            # release is whole. An unsigned .dmg is still built below, so a
+            # dispatch shows whether the Mac build works at all.
+            echo "::notice::No Mac download in this release: unset$missing."
+            echo "signed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "signed=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: A keychain for this job
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          MACOS_DEVID_CERT_P12: ${{ secrets.MACOS_DEVID_CERT_P12 }}
+          MACOS_DEVID_CERT_PASSWORD: ${{ secrets.MACOS_DEVID_CERT_PASSWORD }}
+        run: scripts/macos-keychain.sh create MACOS_DEVID_CERT
+
+      - name: Build, sign and package
+        env:
+          MACOS_SIGN_IDENTITY: ${{ steps.signing.outputs.signed == 'true' && 'Developer ID Application' || '' }}
+          HEADLESS_TARGETS: darwin/arm64 darwin/amd64
+        run: |
+          set -euo pipefail
+          scripts/package-release.sh headless
+          scripts/package-release.sh console macos
+
+      - name: Notarize
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          KEY_ID: ${{ vars.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/private_keys"
+          key="$HOME/private_keys/AuthKey_$KEY_ID.p8"
+          printf '%s' "$APPSTORE_API_KEY_P8" | base64 --decode >"$key"
+
+          # --wait ends when Apple has decided, and the decision is read from
+          # the answer rather than from the exit code: a submission Apple
+          # rejects is a finished wait. The log is what says which binary
+          # and why, so it is printed on any answer but Accepted.
+          notarize() {
+            xcrun notarytool submit "$1" --key "$key" --key-id "$KEY_ID" \
+              --issuer "$ISSUER_ID" --wait --timeout 30m \
+              --output-format json >"$RUNNER_TEMP/notary.json"
+            status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json")
+            echo "$1: $status"
+            if [ "$status" != Accepted ]; then
+              id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json")
+              xcrun notarytool log "$id" --key "$key" --key-id "$KEY_ID" \
+                --issuer "$ISSUER_ID" || true
+              echo "::error::Apple did not notarize $1 ($status)."
+              exit 1
+            fi
+          }
+
+          # The binaries in a zip, because notarytool takes a zip, a pkg or a
+          # dmg and not a tarball. The tarballs are uploaded unchanged:
+          # notarizing records the binaries' hashes and alters nothing.
+          rm -rf "$RUNNER_TEMP/headless"
+          mkdir -p "$RUNNER_TEMP/headless"
+          for bundle in out/summareader-sync-headless-darwin-*.tar.gz; do
+            tar -xzf "$bundle" -C "$RUNNER_TEMP/headless"
+          done
+          ditto -c -k "$RUNNER_TEMP/headless" "$RUNNER_TEMP/headless.zip"
+          notarize "$RUNNER_TEMP/headless.zip"
+
+          # The disk image covers the app inside it. Stapled, so the image
+          # opens without asking Apple first.
+          dmg=$(ls out/*.dmg)
+          notarize "$dmg"
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
+      - name: Into the release
+        if: github.ref_type == 'tag' && steps.signing.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The .dmg last: if anything before it fails to upload, the release
+          # has no Mac download rather than half of one.
+          gh release upload "$GITHUB_REF_NAME" \
+            out/summareader-sync-headless-darwin-*.tar.gz out/*.dmg \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Take the credentials back off the machine
+        if: always()
+        run: |
+          scripts/macos-keychain.sh delete
+          rm -rf "$HOME/private_keys"
+
+  # The console on TestFlight (card 948): the App Store build, uploaded at
+  # each release and handed to the testers.
+  #
+  # Not in Publish's `needs`, and must not be: nothing waits on a store
+  # upload, and an App Store outage must not hold back the public download.
+  # Optional like the Mac download — without its secrets, a notice and
+  # nothing more.
+  #
+  # Sandboxed, unlike the download, because the store requires it: the server
+  # is bundled as a helper that inherits the app's sandbox, and its data
+  # directory is inside the app's container. The console says so when it
+  # finds no library there.
+  testflight:
+    name: TestFlight
+    needs: open
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    # The build, an upload of up to three attempts, and Apple's processing,
+    # which the assign step waits on.
+    timeout-minutes: 150
+    env:
+      # ⛔ The build number must be higher than every build uploaded before
+      # it, and the run number is: it grows with every run of this workflow
+      # and nothing resets it. A re-run of failed jobs keeps it, so a retried
+      # upload of the same build is recognised as one already there, while a
+      # tag deleted and pushed again is a new run and a new number. Derived
+      # from the version instead, that second case would be refused as a
+      # duplicate of a build that was never released.
+      BUILD_NUMBER: ${{ github.run_number }}
+      # Public anyway: it is in every binary this team signs.
+      APPLE_TEAM_ID: TACG5TNYNP
+      BUNDLE_ID: sk.dataiza.summareaderSyncConsole
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.0'
+          channel: stable
+          cache: false
+
+      - name: Signing, or a notice that there is none
+        id: signing
+        env:
+          IOS_DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          MAC_INSTALLER_CERT_P12: ${{ secrets.MAC_INSTALLER_CERT_P12 }}
+          MAC_INSTALLER_CERT_PASSWORD: ${{ secrets.MAC_INSTALLER_CERT_PASSWORD }}
+          MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          APPSTORE_KEY_ID: ${{ vars.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for need in IOS_DIST_CERT_P12 IOS_DIST_CERT_PASSWORD \
+            MAC_INSTALLER_CERT_P12 MAC_INSTALLER_CERT_PASSWORD \
+            MACOS_PROVISIONING_PROFILE APPSTORE_API_KEY_P8 \
+            APPSTORE_KEY_ID APPSTORE_ISSUER_ID; do
+            [ -n "${!need}" ] || missing="$missing $need"
+          done
+          if [ -n "$missing" ]; then
+            # Nothing to build: an App Store package cannot be unsigned.
+            echo "::notice::No TestFlight build in this release: unset$missing."
+            echo "signed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "signed=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: A keychain and the profile for this job
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          IOS_DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          MAC_INSTALLER_CERT_P12: ${{ secrets.MAC_INSTALLER_CERT_P12 }}
+          MAC_INSTALLER_CERT_PASSWORD: ${{ secrets.MAC_INSTALLER_CERT_PASSWORD }}
+          PROFILE_B64: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          scripts/macos-keychain.sh create IOS_DIST_CERT MAC_INSTALLER_CERT
+          profile="$RUNNER_TEMP/store.provisionprofile"
+          printf '%s' "$PROFILE_B64" | base64 --decode >"$profile"
+          # A profile is a signed plist; anything else decoded from the secret
+          # would only be found out at the upload, as a signing refusal.
+          if ! security cms -D -i "$profile" >/dev/null 2>&1; then
+            echo "::error::MACOS_PROVISIONING_PROFILE is not the base64 of a provisioning profile."
+            exit 1
+          fi
+          echo "MACOS_PROFILE=$profile" >>"$GITHUB_ENV"
+
+      - name: Build, sign and package
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          MACOS_STORE_IDENTITY: Apple Distribution
+          # A Mac Installer Distribution certificate's name, which still says
+          # what it was called before Apple renamed the type.
+          MACOS_INSTALLER_IDENTITY: 3rd Party Mac Developer Installer
+        run: scripts/package-release.sh console macos-store
+
+      - name: Upload to App Store Connect
+        if: github.ref_type == 'tag' && steps.signing.outputs.signed == 'true'
+        env:
+          APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          KEY_ID: ${{ vars.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          # altool finds the key by this name in this directory and nowhere
+          # else; the filename is part of the interface.
+          mkdir -p "$HOME/private_keys"
+          printf '%s' "$APPSTORE_API_KEY_P8" | base64 --decode \
+            >"$HOME/private_keys/AuthKey_$KEY_ID.p8"
+          pkg=$(ls out/*.pkg)
+
+          # Three attempts, because App Store Connect answers 502 now and then
+          # to a package that is perfectly good, and a wait that is long
+          # enough for it to recover. A hand-made watchdog, because macOS has
+          # no `timeout` and altool can hang.
+          attempt=1
+          while :; do
+            log="$RUNNER_TEMP/altool-$attempt.log"
+            status=0
+            xcrun altool --upload-app -f "$pkg" -t macos \
+              --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID" >"$log" 2>&1 &
+            uploader=$!
+            (sleep 1800; kill -TERM "$uploader") >/dev/null 2>&1 &
+            watchdog=$!
+            wait "$uploader" || status=$?
+            kill "$watchdog" >/dev/null 2>&1 || true
+            cat "$log"
+            [ "$status" -eq 0 ] && break
+            # An upload that arrived and lost its answer reads like this on
+            # the retry. Matched narrowly, so a real refusal is never taken
+            # for one.
+            if grep -qiE 'The bundle version must be higher than the previously uploaded version|(bundle|train) version .* has already been used|already exists' "$log"; then
+              echo "::warning::build $BUILD_NUMBER was already on App Store Connect."
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::the upload failed three times. Re-running this job is safe."
+              exit 1
+            fi
+            echo "::warning::upload attempt $attempt failed (exit $status)"
+            sleep $((attempt * 120))
+            attempt=$((attempt + 1))
+          done
+
+      # Never fails the job: the build is on App Store Connect either way, and
+      # what is not done here is a few clicks there. The script's exit codes
+      # say what happened; see its header.
+      #
+      # The internal group first and without review, because internal testers
+      # need none — and in case "Testers" was made without automatic
+      # distribution. Then the external group with Beta App Review. That group
+      # can only be made once the app has a build, so on the first release it
+      # does not exist yet and the script warns rather than fails.
+      - name: Hand the build to the testers
+        if: github.ref_type == 'tag' && steps.signing.outputs.signed == 'true'
+        continue-on-error: true
+        working-directory: console
+        env:
+          KEY_ID: ${{ vars.APPSTORE_KEY_ID }}
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          VERSION: ${{ needs.open.outputs.version }}
+        run: |
+          set -euo pipefail
+          # What to Test: this version's changelog, as the release shows it.
+          awk -v h="## $VERSION" '$0 == h {f=1; next} f && /^## / {exit} f' \
+            ../CHANGELOG.md >"$RUNNER_TEMP/whats-new.md"
+          assign() {
+            dart run tool/testflight_assign.dart \
+              --key "$HOME/private_keys/AuthKey_$KEY_ID.p8" \
+              --key-id "$KEY_ID" --issuer "$ISSUER_ID" \
+              --bundle-id "$BUNDLE_ID" --build "$BUILD_NUMBER" \
+              --wait-minutes 60 "$@"
+          }
+          status=0
+          assign --group Testers --review no || status=$?
+          assign --group 'External testers' \
+            --whats-new "$RUNNER_TEMP/whats-new.md" || status=$?
+          exit "$status"
+
+      - name: Take the credentials back off the machine
+        if: always()
+        run: |
+          scripts/macos-keychain.sh delete
+          rm -rf "$HOME/private_keys"
+
   # The one job that builds nothing: it makes the release visible, once every
   # build that was going to succeed has uploaded.
   publish:
     name: Publish
-    needs: [open, headless, console]
-    if: github.ref_type == 'tag'
+    needs: [open, headless, console, macos]
+    # The Mac download is waited for and not required: `always()` lets this
+    # run when the macos job failed or skipped, and the three conditions keep
+    # it from running when anything that is required did not succeed.
+    if: |
+      always()
+      && github.ref_type == 'tag'
+      && needs.open.result == 'success'
+      && needs.headless.result == 'success'
+      && needs.console.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -245,18 +597,20 @@ jobs:
           # .AppImage among them: it is the download a person actually takes
           # on Linux, and the only one that can update itself. A release
           # missing it would quietly send everyone back to unpacking tarballs.
-          #
-          # No console-macos since 2026-09-20. It was unsigned, so it opened by
-          # right-click past a warning; there is no store route for a console
-          # and nobody is being asked to run one on a Mac. Demanding an asset
-          # that is no longer built would refuse to publish every release,
-          # which is the failure this loop exists to prevent, arriving from the
-          # other direction.
           for want in headless-linux-amd64 console-linux-x64 .AppImage; do
             echo "$assets" | grep -q "$want" || {
               echo "::error::nothing matching $want was uploaded"
               exit 1
             }
           done
+          # The Mac download is optional: it needs signing secrets and Apple's
+          # notary, and a release without it is still whole for everybody
+          # else. Said either way, so the run's summary answers whether this
+          # release has one.
+          if echo "$assets" | grep -q '\.dmg$'; then
+            echo "::notice::with the Mac download: $(echo "$assets" | grep '\.dmg$')"
+          else
+            echo "::notice::without the Mac download; the Mac download job says why"
+          fi
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
           echo "published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"

@@ -25,3 +25,6 @@ console/macos/Flutter/ephemeral/
 # committed.
 summareader-sync.json
 out/
+
+# Where package-release.sh assembles the Mac app before it is a .dmg or .pkg.
+build-macos/

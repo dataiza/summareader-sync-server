@@ -2,7 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- What the App Store build is signed with (scripts/package-release.sh
+	     console macos-store). The Developer ID download is signed with no
+	     entitlements at all: it is not sandboxed, so that it shares the
+	     library a headless server on the same Mac keeps.
+
+	     The bundled server inherits all of this; see Helper.entitlements. -->
 	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- The server listens for devices. Without it, bind is refused. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- The mDNS announcement ("Find it on my network") sends multicast, and
+	     the sandbox counts a send as an outgoing connection, so without this
+	     the announcement fails quietly and only a typed address works. The
+	     console's own requests to its server are outgoing too. -->
+	<key>com.apple.security.network.client</key>
 	<true/>
 </dict>
 </plist>
