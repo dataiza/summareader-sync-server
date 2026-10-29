@@ -3,6 +3,12 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.2.0
+
+**A Windows console.** The release now has the console for Windows, as `summareader-sync-console-windows-x64.zip`, with the server and the C++ runtime inside it: unzip it and open `summareader_sync_console.exe`. It is not signed, so Windows may warn about an unknown publisher first.
+
+**The TestFlight build is packaged again.** Its upload stopped before packaging on an entitlement key that was written wrongly, and the wait for Apple's notary is longer.
+
 ## 1.1.0
 
 **The console reads the database once a minute, not all the time.** It asked the server for its statistics every 2 seconds, and each answer read the whole database: on a large library, gigabytes of disk reads, and devices syncing behind them. The server now computes the numbers at most once a minute and answers from them; the console asks every 30 seconds while its window is visible and says when the counts were taken. `/overview` gains `computed_at`, and `/metrics` a gauge for the same time.
