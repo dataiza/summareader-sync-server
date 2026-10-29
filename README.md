@@ -22,6 +22,7 @@ Built releases are on the [Releases](../../releases/latest) page.
 |---|---|---|
 | **Console, Linux** | a desktop, with a window | `SummaReaderSync-<version>-x86_64.AppImage` |
 | **Headless** | a server reached over the network | `summareader-sync-headless-<os>-<arch>.tar.gz` (`.zip` on Windows) |
+| **Console, Windows** | a desktop, with a window | `summareader-sync-console-windows-x64.zip` |
 | Console, Linux, unpacked | packaging it yourself | `summareader-sync-console-linux-x64.tar.gz` |
 
 On Linux the AppImage is the one to take:
@@ -87,8 +88,9 @@ tar -xzf summareader-sync-console-linux-x64.tar.gz
 ./summareader-sync-console/summareader_sync_console
 ```
 
-```sh
-```
+On Windows, unzip `summareader-sync-console-windows-x64.zip` and open
+`summareader-sync-console\summareader_sync_console.exe`. It is not signed, so
+Windows may stop it first: choose **More info**, then **Run anyway**.
 
 The console carries its own copy of the server binary beside it. Nothing else
 to install.

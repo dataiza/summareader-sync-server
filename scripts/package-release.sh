@@ -143,7 +143,7 @@ headless)
 
 console)
   host="${2:-}"
-  [ -n "$host" ] || { echo "which platform: linux, macos or macos-store" >&2; exit 1; }
+  [ -n "$host" ] || { echo "which platform: linux, windows, macos or macos-store" >&2; exit 1; }
   command -v flutter >/dev/null || { echo "No Flutter toolchain." >&2; exit 1; }
 
   case "$host" in
@@ -178,6 +178,24 @@ console)
       "$version" \
       "$out/SummaReaderSync-$version-x86_64.AppImage"
 
+    rm -rf "$dir"
+    ;;
+  windows)
+    # Under Git's bash on a Windows runner: Flutter cannot cross-compile the
+    # window, but Go builds the server here as on any other host.
+    (cd console && flutter pub get && flutter build windows --release)
+    dir="$name-console"
+    rm -rf "$dir"
+    cp -r console/build/windows/x64/runner/Release "$dir"
+    build_server windows amd64 "$dir/$name.exe"
+    # The C++ runtime beside the exe: a PC without the Visual C++
+    # Redistributable refuses to start the console and names these three.
+    for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+      cp "/c/Windows/System32/$dll" "$dir/"
+    done
+    cp LICENSE CHANGELOG.md "$dir/"
+    # 7-Zip, because the runner has it and Git's bash has no zip.
+    7z a -tzip -bso0 "$out/$name-console-windows-x64.zip" "./$dir"
     rm -rf "$dir"
     ;;
   macos)

@@ -158,7 +158,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" out/* \
             --repo "$GITHUB_REPOSITORY" --clobber
 
-  # The window, for the two platforms there is a runner for. A Flutter desktop
+  # The window, for Linux and Windows; the Mac has its own jobs below. A Flutter desktop
   # build is the machine it was built on — there is no cross-compiling here,
   # which is why this is a matrix over runners rather than over targets.
   console:
@@ -175,6 +175,10 @@ jobs:
         include:
           - os: linux
             runner: ubuntu-latest
+          # Hosted, because this repository is public and so pays nothing for
+          # it; the runner carries Visual Studio's C++ tools and 7-Zip.
+          - os: windows
+            runner: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -210,10 +214,13 @@ jobs:
             imagemagick
 
       - name: Build and package
+        # bash on Windows too: the script is the same on every host.
+        shell: bash
         run: scripts/package-release.sh console ${{ matrix.os }}
 
       - name: Into the release
         if: github.ref_type == 'tag'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -597,7 +604,7 @@ jobs:
           # .AppImage among them: it is the download a person actually takes
           # on Linux, and the only one that can update itself. A release
           # missing it would quietly send everyone back to unpacking tarballs.
-          for want in headless-linux-amd64 console-linux-x64 .AppImage; do
+          for want in headless-linux-amd64 console-linux-x64 console-windows-x64 .AppImage; do
             echo "$assets" | grep -q "$want" || {
               echo "::error::nothing matching $want was uploaded"
               exit 1
