@@ -14,6 +14,7 @@ class PairedDevice {
     this.label = '',
     this.revoked = false,
     this.lastSeen = '',
+    this.client = '',
     this.entries = 0,
   });
 
@@ -22,6 +23,7 @@ class PairedDevice {
     label: json['label'] as String? ?? '',
     revoked: json['revoked'] as bool? ?? false,
     lastSeen: json['last_seen'] as String? ?? '',
+    client: json['client'] as String? ?? '',
     entries: (json['entries'] as num?)?.toInt() ?? 0,
   );
 
@@ -29,6 +31,10 @@ class PairedDevice {
   final String label;
   final bool revoked;
   final String lastSeen;
+
+  /// Which build of the app it last said it was, already as the server
+  /// words it (card 1004); empty until it has said.
+  final String client;
   final int entries;
 }
 

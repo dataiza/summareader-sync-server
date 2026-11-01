@@ -45,6 +45,9 @@ type overviewDevice struct {
 	Account  string `json:"account"`
 	Revoked  bool   `json:"revoked"`
 	LastSeen string `json:"last_seen,omitempty"`
+	// Which build of the app it last said it was, card 1004; empty for one
+	// that has not said since the server started keeping it.
+	Client string `json:"client,omitempty"`
 	// How many entries carry this device's id.
 	//
 	// This is what "syncs" means on a server that keeps a log and not
@@ -103,10 +106,12 @@ func collectOverview(app core.App) (overview, error) {
 		Account  string `db:"account"`
 		Revoked  bool   `db:"revoked"`
 		LastSeen string `db:"last_seen"`
+		Client   string `db:"client"`
 	}
 	err = app.DB().NewQuery(
 		"SELECT id, COALESCE(label, '') AS label, account, revoked," +
-			" COALESCE(last_seen, '') AS last_seen" +
+			" COALESCE(last_seen, '') AS last_seen," +
+			" COALESCE(client, '') AS client" +
 			" FROM " + collDevices + " ORDER BY label, id",
 	).All(&rows)
 	if err != nil {
@@ -119,6 +124,7 @@ func collectOverview(app core.App) (overview, error) {
 			Account:  row.Account,
 			Revoked:  row.Revoked,
 			LastSeen: row.LastSeen,
+			Client:   row.Client,
 			Entries:  stats.DeviceEntries[row.ID],
 		})
 	}

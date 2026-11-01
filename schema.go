@@ -218,12 +218,24 @@ func lastSeenField() *core.TextField {
 	return &core.TextField{Name: "last_seen", Max: 40}
 }
 
+// Which build of the app the device last said it was, card 1004: already in
+// the form the operator reads. See clientLabel.
+func clientField() *core.TextField {
+	return &core.TextField{Name: "client", Max: 200}
+}
+
 func ensureDevices(app core.App) error {
 	if existing, err := app.FindCollectionByNameOrId(collDevices); err == nil {
 		// Added to a collection that already exists, for the same reason
 		// quota_bytes is: an upgrade must not need its owner to run anything.
 		if existing.Fields.GetByName("last_seen") == nil {
 			existing.Fields.Add(lastSeenField())
+			if err := app.Save(existing); err != nil {
+				return err
+			}
+		}
+		if existing.Fields.GetByName("client") == nil {
+			existing.Fields.Add(clientField())
 			if err := app.Save(existing); err != nil {
 				return err
 			}
@@ -244,6 +256,7 @@ func ensureDevices(app core.App) error {
 	c.Fields.Add(&core.BoolField{Name: "revoked"})
 
 	c.Fields.Add(lastSeenField())
+	c.Fields.Add(clientField())
 
 	c.AddIndex("idx_devices_token", true, "token", "")
 	return app.Save(c)

@@ -424,7 +424,7 @@ func authenticate(e *core.RequestEvent) (accountID, deviceID string, err error) 
 	// been guessing tokens. Coarse and best-effort — see seen.go. Both ways of
 	// failing above return before reaching here, so a broken lookup writes no
 	// more than a guessed token does.
-	touchDevice(e.App, deviceID, time.Now())
+	touchDevice(e.App, deviceID, time.Now(), e.Request.UserAgent())
 
 	return accountID, deviceID, nil
 }

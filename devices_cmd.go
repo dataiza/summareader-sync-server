@@ -160,6 +160,9 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 					state = "  [stopped]"
 				}
 				cmd.Printf("%s  %-24s  last seen %s%s\n", d.ID, label, seen, state)
+				if d.Client != "" {
+					cmd.Printf("%s  %-24s  %s\n", strings.Repeat(" ", len(d.ID)), "", d.Client)
+				}
 			}
 		},
 	}

@@ -807,6 +807,13 @@ class _ConsoleViewState extends State<ConsoleView> {
                 '${plural(device.entries, 'entry')} received',
                 style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
               ),
+              // No line at all for a device that has not said, rather than
+              // "unknown": an older app simply has nothing to report.
+              if (device.client.isNotEmpty)
+                Text(
+                  device.client,
+                  style: Ar.bodyStyle(12.5, color: Ar.dim(0.6)),
+                ),
             ],
           ),
         ),

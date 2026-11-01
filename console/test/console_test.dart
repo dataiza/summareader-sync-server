@@ -373,6 +373,41 @@ void main() {
     expect(state.countsLine, '0 devices · 0 entries · 0.0 MB');
   });
 
+  // Card 1004: which build each device runs, under its name; nothing at all
+  // for a device that has not said.
+  testWidgets('a device row names the build it runs', (tester) async {
+    final phone = PairedDevice.fromJson({
+      'id': 'p1',
+      'label': 'Pixel 8',
+      'client': 'SummaReader 0.137.2 · Android · premium',
+    });
+    expect(phone.client, 'SummaReader 0.137.2 · Android · premium');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ConsoleView(
+            state: ConsoleState(
+              dir: '/data',
+              addr: '127.0.0.1:8099',
+              running: true,
+              serverBinary: '/bin/summareader-sync',
+              paired: [
+                phone,
+                const PairedDevice(id: 'k7d', label: 'Laptop'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.text('SummaReader 0.137.2 · Android · premium'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('SummaReader 0.'), findsOneWidget);
+  });
+
   // Card 713: the fingerprint is what somebody compares against the question
   // a device asks on first contact, so the window shows it where the address
   // is.
