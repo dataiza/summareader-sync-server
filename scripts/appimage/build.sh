@@ -79,6 +79,9 @@ if [ "$got" != "$runtime_sha" ]; then
 fi
 
 app="$(mktemp -d)"
+# mktemp makes it 0700, and that becomes the mode of the image's root: only
+# its owner could read it. appimagetool from 4919cc4 refuses that, rightly.
+chmod 755 "$app"
 trap 'rm -rf "$app"' EXIT
 
 mkdir -p "$app/usr/bin"
