@@ -3,6 +3,10 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.3.0
+
+**Each device shows which build of the app it runs.** The console's device row and `summareader-sync devices list` add a line such as `SummaReader 0.138.0 · Android · premium`, from app 0.138.0 on. The server keeps it in a new `client` field on the devices collection, added on start with nothing to do; a device on an older app shows no line. A request whose User-Agent is not the app's leaves the field as it was.
+
 ## 1.2.0
 
 **A Windows console.** The release now has the console for Windows, as `summareader-sync-console-windows-x64.zip`, with the server and the C++ runtime inside it: unzip it and open `summareader_sync_console.exe`. It is not signed, so Windows may warn about an unknown publisher first.
