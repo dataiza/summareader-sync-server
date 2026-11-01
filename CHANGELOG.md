@@ -3,6 +3,10 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.3.1
+
+**The Linux console is built again.** 1.3.0 was never published: the tool that packs the AppImage was rebuilt upstream on the day, and the new build refuses an image whose top folder only its owner can read. Ours was such an image. Everything in 1.3.0 is in this release.
+
 ## 1.3.0
 
 **Each device shows which build of the app it runs.** The console's device row and `summareader-sync devices list` add a line such as `SummaReader 0.138.0 · Android · premium`, from app 0.138.0 on. The server keeps it in a new `client` field on the devices collection, added on start with nothing to do; a device on an older app shows no line. A request whose User-Agent is not the app's leaves the field as it was.
