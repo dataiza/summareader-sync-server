@@ -104,19 +104,54 @@ class GitHubUpdates implements Updates {
 /// then this process exits. What is not done here is anything clever about
 /// saving: this console writes as it goes, so there is no document to flush.
 ///
-/// Returns a sentence when it could not start — a moved file, a permission —
-/// and never returns at all when it could.
-Future<String?> restartInto(String image) async {
+/// Not started directly, though (card 1007). The console is unique on Linux,
+/// so a new process that finds this one still holding the application id
+/// hands itself over to it and ends, and then this one ends too, leaving
+/// nothing running. A detached shell waits for this process id to disappear
+/// and only then runs the image; see [startAfterExit].
+///
+/// [args] are passed to the image, which is how a `--install` given to a
+/// copy that was switched to survives the switch.
+///
+/// Returns a sentence when it could not start — no shell, a permission — and
+/// never returns at all when it could. A moved or missing image is found by
+/// the shell after this process has gone, and is not reported.
+Future<String?> restartInto(
+  String image, [
+  List<String> args = const [],
+]) async {
   try {
-    await Process.start(image, const [], mode: ProcessStartMode.detached);
+    await Process.start(
+      '/bin/sh',
+      startAfterExit(pid, image, args),
+      mode: ProcessStartMode.detached,
+    );
   } on ProcessException catch (error) {
     return 'Could not start $image (${error.message}). Start it yourself.';
   }
-  // A moment for the new process to be on its way before this one goes; the
-  // AppImage runtime mounts before it execs, and a mount is not instant.
-  await Future<void>.delayed(const Duration(milliseconds: 200));
   exit(0);
 }
+
+/// The arguments for `/bin/sh` that start [image] once process [waitFor] has
+/// gone.
+///
+/// The wait is bounded at thirty seconds, because a parent that never reaps
+/// the process would keep its id visible for ever, and the half second after
+/// it covers the session bus noticing that the name is free. The same script
+/// as the app's (card 900).
+List<String> startAfterExit(
+  int waitFor,
+  String image, [
+  List<String> args = const [],
+]) => [
+  '-c',
+  r'i=0; while kill -0 "$1" 2>/dev/null && [ $i -lt 300 ]; do '
+      r'sleep 0.1; i=$((i+1)); done; sleep 0.5; shift; exec "$@"',
+  'sh',
+  '$waitFor',
+  image,
+  ...args,
+];
 
 /// Whether [offered] is a later version than [mine].
 ///

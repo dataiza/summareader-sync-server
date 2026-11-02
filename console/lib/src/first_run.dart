@@ -256,6 +256,57 @@ Future<bool> askAboutTheMenu(BuildContext context) async {
   return wanted;
 }
 
+/// Whether to close this console and switch to another one that was just
+/// started (card 1007).
+///
+/// Asked rather than done, because the other one may be a download somebody
+/// opened by mistake, and switching stops the server this window supervises
+/// for as long as the new one takes to start it again.
+///
+/// Returns true to switch.
+Future<bool> askAboutASwitch(BuildContext context, String version) async {
+  var wanted = false;
+
+  await showConsoleDialog(
+    context,
+    'Another copy was started',
+    Builder(
+      builder: (dialogContext) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'SummaReader Sync $version was started. Close this version and '
+            'switch to it?',
+            style: Ar.bodyStyle(13.5, color: Ar.dim(0.75), height: 1.6),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(
+                label: 'Not now',
+                onTap: () => Navigator.of(dialogContext).pop(),
+              ),
+              const SizedBox(width: 9),
+              PrimaryButton(
+                label: 'Switch',
+                onTap: () {
+                  wanted = true;
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+    done: false,
+  );
+
+  return wanted;
+}
+
 /// Offers to repoint a menu entry that names a file somewhere else.
 ///
 /// Asked rather than done, on the same grounds as adding it in the first

@@ -18,6 +18,10 @@ apply_standard_settings(${BINARY_NAME})
 
 # Add preprocessor definitions for the application ID.
 add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
+# The version a second launch tells the running console it is (card 1007), to
+# match `ownLaunchVersion` in lib/src/second_launch.dart. From pubspec.yaml,
+# by way of the Flutter tool's generated configuration.
+add_definitions(-DAPPLICATION_VERSION="${FLUTTER_VERSION}")
 
 # Add dependency libraries. Add any application-specific dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)

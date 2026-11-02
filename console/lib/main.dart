@@ -33,6 +33,9 @@ void main(List<String> args) {
           flagValue(args, '--http') ??
           env['SUMMAREADER_HTTP'] ??
           (configured.isEmpty ? '127.0.0.1:8099' : configured),
+      // Answers the menu question yes without asking (card 1007), for a
+      // script or a terminal that installs a new download in one step.
+      install: args.contains('--install'),
     ),
   );
 }
@@ -44,6 +47,7 @@ class ConsoleApp extends StatelessWidget {
     required this.configDir,
     required this.addr,
     required this.chosen,
+    this.install = false,
   });
 
   /// Where the database is.
@@ -60,6 +64,9 @@ class ConsoleApp extends StatelessWidget {
 
   /// Whether anything said where the library goes.
   final bool chosen;
+
+  /// Whether the console was started with `--install`.
+  final bool install;
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +89,7 @@ class ConsoleApp extends StatelessWidget {
           configDir: configDir,
           addr: addr,
           chosen: chosen,
+          install: install,
         ),
       ),
     );
