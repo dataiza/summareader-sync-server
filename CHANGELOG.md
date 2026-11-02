@@ -3,7 +3,7 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 1.4.0
 
 **A second Linux console hands itself to the running one.** Starting the console AppImage while another console runs no longer opens a second window, which could start a second server on the same address and library. The same file at the same version brings the running window forward. Another file or version asks "SummaReader Sync <version> was started. Close this version and switch to it?": **Switch** stops the server the console supervises, as closing the window does, and starts the other file; a server run by the systemd unit is left running. The new console then offers the applications menu as before. **A console older than this change cannot take the hand-over**, so the first move to it still starts beside the old console: close the old one by hand first. *Restart now* after an update now waits for the old console to exit before it starts the new one.
 
