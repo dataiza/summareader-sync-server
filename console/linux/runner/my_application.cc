@@ -10,6 +10,9 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  // Where a second launch is handed to Dart (card 1007). Null until the view
+  // exists.
+  FlMethodChannel* launch_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -22,6 +25,12 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  // One console (card 1007). Anything that activates the running console
+  // again brings its window forward, rather than opening a second window.
+  if (GList* windows = gtk_application_get_windows(GTK_APPLICATION(application))) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+    return;
+  }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -75,10 +84,27 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->launch_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "sk.dataiza.summareader.sync/launch", FL_METHOD_CODEC(codec));
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
 // Implements GApplication::local_command_line.
+//
+// A second launch hands itself over to the running console (card 1007).
+// Before, the console was not unique: every launch was its own process, so a
+// newer download started beside an older console opened a second window,
+// which could start a second server on the same address and library. The
+// running console now gets the second launch's file, version and arguments,
+// and asks whether to switch. The same hand-over as the app's (card 900).
+//
+// The command line of GApplication carries them, with
+// G_APPLICATION_HANDLES_COMMAND_LINE, and GApplication's own bus name is the
+// answer to "is a console already running": whoever owns it is the console,
+// and nobody else gets as far as starting Dart.
 static gboolean my_application_local_command_line(GApplication* application,
                                                   gchar*** arguments,
                                                   int* exit_status) {
@@ -93,10 +119,67 @@ static gboolean my_application_local_command_line(GApplication* application,
     return TRUE;
   }
 
+  if (g_application_get_is_remote(application)) {
+    // The file this copy was started from: the AppImage's own path, which
+    // its runtime sets, or the binary's. Inside an image the binary is in a
+    // mount that vanishes with the process, so it is the wrong thing to
+    // start later.
+    const gchar* image = g_getenv("APPIMAGE");
+    g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
+    const gchar* path = image != nullptr && image[0] != '\0' ? image
+                        : exe != nullptr                     ? exe
+                                                             : (*arguments)[0];
+    // Sent as the program name, the path, the version, and then the
+    // arguments as given. Returning FALSE has GApplication pass these to the
+    // running console's command_line and wait until it has taken them.
+    GPtrArray* sent = g_ptr_array_new();
+    g_ptr_array_add(sent, g_strdup((*arguments)[0]));
+    g_ptr_array_add(sent, g_strdup(path));
+    g_ptr_array_add(sent, g_strdup(APPLICATION_VERSION));
+    for (gchar** arg = *arguments + 1; *arg != nullptr; arg++) {
+      g_ptr_array_add(sent, g_strdup(*arg));
+    }
+    g_ptr_array_add(sent, nullptr);
+    g_strfreev(*arguments);
+    *arguments = reinterpret_cast<gchar**>(g_ptr_array_free(sent, FALSE));
+    return FALSE;
+  }
+
   g_application_activate(application);
   *exit_status = 0;
 
   return TRUE;
+}
+
+// Implements GApplication::command_line, which runs in the running console
+// for each second launch, never for its own. The window comes forward either
+// way; Dart then decides whether the launch was this console started again or
+// another one worth asking about.
+static int my_application_command_line(GApplication* application,
+                                       GApplicationCommandLine* command_line) {
+  MyApplication* self = MY_APPLICATION(application);
+  if (GList* windows = gtk_application_get_windows(GTK_APPLICATION(application))) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+  }
+
+  gint argc = 0;
+  g_auto(GStrv) argv =
+      g_application_command_line_get_arguments(command_line, &argc);
+  // Fewer than three is a launch that did not come from this runner. There
+  // is nothing to compare, so bringing the window forward is all of it.
+  if (self->launch_channel == nullptr || argc < 3) return 0;
+
+  g_autoptr(FlValue) args = fl_value_new_list();
+  for (gint i = 3; i < argc; i++) {
+    fl_value_append_take(args, fl_value_new_string(argv[i]));
+  }
+  g_autoptr(FlValue) launch = fl_value_new_map();
+  fl_value_set_string_take(launch, "path", fl_value_new_string(argv[1]));
+  fl_value_set_string_take(launch, "version", fl_value_new_string(argv[2]));
+  fl_value_set_string(launch, "args", args);
+  fl_method_channel_invoke_method(self->launch_channel, "launched", launch,
+                                  nullptr, nullptr, nullptr);
+  return 0;
 }
 
 // Implements GApplication::startup.
@@ -121,6 +204,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->launch_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
@@ -128,6 +212,7 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
   G_APPLICATION_CLASS(klass)->local_command_line =
       my_application_local_command_line;
+  G_APPLICATION_CLASS(klass)->command_line = my_application_command_line;
   G_APPLICATION_CLASS(klass)->startup = my_application_startup;
   G_APPLICATION_CLASS(klass)->shutdown = my_application_shutdown;
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
@@ -144,5 +229,9 @@ MyApplication* my_application_new() {
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     // Unique, and HANDLES_COMMAND_LINE hands
+                                     // a second launch's arguments to the
+                                     // running console (card 1007).
+                                     G_APPLICATION_HANDLES_COMMAND_LINE,
+                                     nullptr));
 }

@@ -14,6 +14,7 @@ import 'first_run.dart';
 import 'updates.dart';
 import 'console_view.dart';
 import 'pairing_dialogs.dart';
+import 'second_launch.dart';
 import 'server.dart';
 import 'service.dart';
 
@@ -28,7 +29,13 @@ class ConsoleScreen extends StatefulWidget {
     this.chosen = true,
     this.client,
     this.environment,
+    this.install = false,
   });
+
+  /// Whether the console was started with `--install` (card 1007): the menu
+  /// question is answered yes without being asked, also after an earlier no,
+  /// because the option is a newer and more explicit answer than that no.
+  final bool install;
 
   /// The two things an update needs from outside this process: somewhere to
   /// fetch the image from, and an APPIMAGE to replace. Null everywhere but a
@@ -187,6 +194,11 @@ class _ConsoleScreenState extends State<ConsoleScreen>
       }
     }
 
+    // Another console started while this one runs is handed to this one by
+    // the runner (card 1007). Only the Linux runner sends anything; elsewhere
+    // the channel stays silent.
+    listenForLaunches(_anotherCopyStarted);
+
     unawaited(_refresh());
     _poll.start();
 
@@ -207,6 +219,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     for (final signal in _signals) {
       unawaited(signal.cancel());
     }
+    launchChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -236,6 +249,34 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   Future<AppExitResponse> didRequestAppExit() async {
     await _stopWhatWeStarted();
     return AppExitResponse.exit;
+  }
+
+  /// A second launch, handed over by the runner (card 1007). The same file at
+  /// the same version is this console started again, and the runner has
+  /// already brought the window forward; anything else is asked about.
+  ///
+  /// Switching stops the server the way closing the window does, so a unit
+  /// that owns the server leaves it running and only the console is
+  /// replaced. The other console starts after this one has gone; see
+  /// [restartInto].
+  Future<void> _anotherCopyStarted(
+    String path,
+    String version,
+    List<String> args,
+  ) async {
+    final offer = offersSwitch(
+      path: path,
+      version: version,
+      ownPath: ownLaunchPath(widget.environment),
+      ownVersion: ownLaunchVersion,
+    );
+    if (!offer || !mounted) return;
+    final wanted = await askAboutASwitch(context, version);
+    if (!wanted || !mounted) return;
+    await _stopWhatWeStarted();
+    final refusal = await restartInto(path, args);
+    // Only reached when the shell did not start: the other branch exits.
+    if (refusal != null) _fail(refusal);
   }
 
   Future<void> _refresh() async {
@@ -600,15 +641,18 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// The answer is written down either way, which is what makes the question
   /// on a first run a question asked once rather than every launch.
   Future<void> _setInMenu(bool wanted) async {
-    final image = runningImage();
+    final env = widget.environment;
+    final image = runningImage(env);
     if (image == null) return;
     try {
       // Moved somewhere it can stay before the entry names it. The entry
       // holds an absolute path, and until this it named wherever the file
       // happened to be when the question was answered — usually a downloads
       // folder, which people empty.
-      final kept = wanted ? await keepImage(image) : image;
-      final refusal = wanted ? await addToMenu(kept) : await removeFromMenu();
+      final kept = wanted ? await keepImage(image, environment: env) : image;
+      final refusal = wanted
+          ? await addToMenu(kept, environment: env)
+          : await removeFromMenu(environment: env);
       saveConfig(widget.configDir, {'in_menu': wanted});
       if (!mounted) return;
       setState(() {
@@ -627,41 +671,52 @@ class _ConsoleScreenState extends State<ConsoleScreen>
   /// and this is the only moment anything can notice, because the program that
   /// would have complained is the one that is not there.
   Future<void> _offerToRepoint() async {
-    if (!mounted || !menuIsStale()) return;
+    final env = widget.environment;
+    if (!mounted || !menuIsStale(env)) return;
 
-    final image = runningImage();
+    final image = runningImage(env);
     if (image == null) return;
-    final named = menuTarget() ?? '';
+    final named = menuTarget(env) ?? '';
     // Named before the question is asked, because the dialog says what the
     // button will do and deleting somebody's file is the part of that worth
     // saying out loud.
     final replacing =
-        supersedes(named, '${applicationsDir()}/${image.split('/').last}')
+        supersedes(
+          named,
+          '${applicationsDir(env)}/${image.split('/').last}',
+          environment: env,
+        )
         ? named.split('/').last
         : null;
 
-    final wanted = await askAboutARepoint(
-      context,
-      named,
-      image,
-      replacing: replacing,
-    );
+    // `--install` is the yes, given before the question (card 1007).
+    final wanted =
+        widget.install ||
+        await askAboutARepoint(context, named, image, replacing: replacing);
     if (!mounted || !wanted) return;
     await _setInMenu(true);
     // The entry now names where the image was kept, which is the one file
     // this must never delete.
-    await removeSuperseded(named, menuTarget() ?? '');
+    await removeSuperseded(named, menuTarget(env) ?? '', environment: env);
   }
 
   /// Offers the menu once, on a first run that is an AppImage.
   ///
   /// Only when the key is absent: a stored `false` is somebody having said no,
   /// and asking again would make "once" mean "every launch until you give in".
+  ///
+  /// `--install` answers yes without asking, and also overrides a stored no
+  /// (card 1007). Already in the menu, it does nothing here; a stale entry is
+  /// [_offerToRepoint]'s.
   Future<void> _offerTheMenu() async {
-    if (!mounted || runningImage() == null) return;
-    if (readConfig(widget.configDir)['in_menu'] is bool || isInMenu()) return;
+    final env = widget.environment;
+    if (!mounted || runningImage(env) == null) return;
+    if (isInMenu(env)) return;
+    if (!widget.install && readConfig(widget.configDir)['in_menu'] is bool) {
+      return;
+    }
 
-    final wanted = await askAboutTheMenu(context);
+    final wanted = widget.install || await askAboutTheMenu(context);
     if (!mounted) return;
     if (wanted) {
       await _setInMenu(true);

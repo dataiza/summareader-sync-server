@@ -37,6 +37,15 @@ itself to your applications menu, and it updates itself: **Configuration → Thi
 program → Check for updates** asks GitHub for the newest release and replaces
 the file. Nothing is checked until you press it.
 
+Only one console runs at a time. Start a newer download while the old console
+is open and the old one asks to switch to it; **Switch** closes it and starts
+the new one. Add `--install` to put the new one in the menu without the
+question:
+
+```sh
+./SummaReaderSync-*-x86_64.AppImage --install
+```
+
 It needs FUSE to mount itself, which every desktop has; if yours does not, run
 it with `--appimage-extract-and-run`, or take the tarball.
 
