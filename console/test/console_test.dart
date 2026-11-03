@@ -183,6 +183,78 @@ void main() {
     expect(File('${file.path}.tmp').existsSync(), isFalse);
   });
 
+  // Card 1011. An AppImage console finds its server in the image's mount,
+  // which is gone once the console closes. A unit rewritten with that path is
+  // a service that does not come back at the next login.
+  group('the binary a rewritten unit runs', () {
+    const installed = '/home/u/.local/bin/summareader-sync';
+    const mounted = '/tmp/.mount_x/usr/bin/summareader-sync';
+    String unitFor(String exe) => renderUnit(
+      ServiceConfig(
+        exe: exe,
+        addr: '127.0.0.1:8099',
+        dir: '/home/u/pb_data',
+        tokens: const Tokens(metrics: 'm', operator: 'o'),
+      ),
+    );
+
+    test('an AppImage console keeps the one the unit names', () {
+      final exe = unitServer(
+        console: mounted,
+        unit: unitFor(installed),
+        image: true,
+        outside: const [],
+        exists: (path) => path == installed || path == mounted,
+      );
+
+      expect(
+        unitFor(exe!),
+        contains('ExecStart=$installed serve --http=127.0.0.1:8099'),
+      );
+    });
+
+    test('a mount path an older console wrote is not kept', () {
+      const stale = '/tmp/.mount_old/usr/bin/summareader-sync';
+      const onPath = '/usr/local/bin/summareader-sync';
+      bool exists(String path) => path == onPath || path == mounted;
+
+      expect(
+        unitServer(
+          console: mounted,
+          unit: unitFor(stale),
+          image: true,
+          outside: const [onPath, installed],
+          exists: exists,
+        ),
+        onPath,
+      );
+      // Nothing outside the image: no path rather than the mount.
+      expect(
+        unitServer(
+          console: mounted,
+          unit: unitFor(stale),
+          image: true,
+          outside: const [installed],
+          exists: exists,
+        ),
+        isNull,
+      );
+    });
+
+    test('a console that is not an AppImage writes its own', () {
+      expect(
+        unitServer(
+          console: '/opt/sync/summareader-sync',
+          unit: unitFor(installed),
+          image: false,
+          outside: const [],
+          exists: (_) => true,
+        ),
+        '/opt/sync/summareader-sync',
+      );
+    });
+  });
+
   // The exact bytes the QR carries, because they are a contract with the app.
   //
   // A renamed field or a stray one shows up nowhere on this side: the code
