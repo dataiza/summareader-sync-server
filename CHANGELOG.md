@@ -3,7 +3,7 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 1.4.1
 
 **The console AppImage no longer breaks the systemd unit.** A change of name, address, data directory or binary/container in the AppImage console rewrote the unit with the server inside the image, a path that is gone once the console closes, so the service did not come back at the next login. The rewrite now keeps the server the unit already names. A unit an older AppImage console broke this way gets the server on PATH or in `~/.local/bin`, and with neither the console says so and leaves the unit as it is.
 
