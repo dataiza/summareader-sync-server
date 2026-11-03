@@ -358,15 +358,35 @@ class _ConsoleScreenState extends State<ConsoleScreen>
     setState(() => _state = _state.withError(error.toString()));
   }
 
-  ServiceConfig _serviceConfig({String? addr, bool? docker}) => ServiceConfig(
-    exe: _server.exe ?? '',
-    addr: addr ?? _server.addr,
-    dir: _dir,
-    tokens: _server.tokens,
-    compose: (docker ?? _docker) ? _compose : null,
-    uid: _uid(),
-    gid: _gid(),
-  );
+  ServiceConfig _serviceConfig({String? addr, bool? docker}) {
+    final compose = (docker ?? _docker) ? _compose : null;
+    // From an AppImage, the unit keeps a server outside the image. Card 1011.
+    final exe = unitServer(
+      console: _server.exe,
+      unit: installedUnit(),
+      image: _updatable,
+      outside: [
+        ?serverOnPath(),
+        '${Platform.environment['HOME']}/.local/bin/summareader-sync',
+      ],
+    );
+    // A container unit names no binary, so only the native one needs it.
+    if (exe == null && compose == null && _updatable) {
+      throw Exception(
+        'No summareader-sync outside this AppImage for the service to run. '
+        'Install it with scripts/install.sh, which puts it in ~/.local/bin.',
+      );
+    }
+    return ServiceConfig(
+      exe: exe ?? '',
+      addr: addr ?? _server.addr,
+      dir: _dir,
+      tokens: _server.tokens,
+      compose: compose,
+      uid: _uid(),
+      gid: _gid(),
+    );
+  }
 
   Future<void> _toggle() async {
     try {

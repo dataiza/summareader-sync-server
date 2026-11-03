@@ -270,6 +270,36 @@ String serviceBind() => serviceBindIn(installedUnit());
 /// choice that was made rather than on the default.
 bool serviceDocker() => installedUnit().contains('ExecStart=docker compose');
 
+/// The server binary a rewrite of the installed [unit] runs. Card 1011.
+///
+/// A console started from its AppImage finds its server in the image's mount,
+/// a directory that is named differently at every launch and is gone once the
+/// console closes. A unit given that path fails at the next login. So such a
+/// console keeps the binary the unit already names, and when that is a mount
+/// too, because an older console wrote it, takes the first of [outside] that
+/// exists. Null when there is none, which is better said than written.
+String? unitServer({
+  required String? console,
+  required String unit,
+  required bool image,
+  required List<String> outside,
+  bool Function(String path)? exists,
+}) {
+  if (!image || unit.isEmpty) return console;
+  final there = exists ?? (path) => File(path).existsSync();
+  final kept = [
+    for (final line in unit.split('\n'))
+      if (line.startsWith('ExecStart=')) line.substring(10).split(' ').first,
+  ];
+  for (final path in [...kept, ...outside]) {
+    // Absolute only, which leaves out the `docker` of a container unit.
+    if (path.startsWith('/') && !path.contains('/.mount_') && there(path)) {
+      return path;
+    }
+  }
+  return null;
+}
+
 /// Writes the unit and enables it. Writing over an existing one is the update
 /// path: the bind address changed in the console has to reach the unit too, or
 /// the service comes back on the old one.

@@ -133,7 +133,13 @@ String? serverBinary() {
     final file = File(candidate);
     if (file.existsSync()) return file.absolute.path;
   }
+  return serverOnPath();
+}
 
+/// The server binary on PATH, or null. Never inside an AppImage's mount,
+/// because the image's AppRun leaves PATH as it found it.
+String? serverOnPath() {
+  final exe = Platform.isWindows ? 'summareader-sync.exe' : 'summareader-sync';
   final which = Platform.isWindows ? 'where' : 'which';
   final found = Process.runSync(which, [exe]);
   if (found.exitCode == 0) {
