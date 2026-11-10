@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -113,6 +116,22 @@ Future<void> showDeviceCode(
   );
 }
 
+/// Copies [secret], and takes it off the clipboard a minute later unless
+/// something else has been copied since. Card 1033.
+///
+/// The clipboard hands its contents to any program that asks, and a pairing
+/// code or a token is worth what a password is worth. A minute is enough to
+/// paste it; whatever the person copied after it is theirs, and stays.
+Future<void> copySecret(String secret) async {
+  await Clipboard.setData(ClipboardData(text: secret));
+  Timer(const Duration(seconds: 60), () async {
+    final now = await Clipboard.getData(Clipboard.kTextPlain);
+    if (now?.text == secret) {
+      await Clipboard.setData(const ClipboardData(text: ''));
+    }
+  });
+}
+
 class _TokenBody extends StatefulWidget {
   const _TokenBody({
     required this.device,
@@ -155,7 +174,15 @@ class _TokenBodyState extends State<_TokenBody> {
             widget.hosts,
             secure: widget.fingerprint != null,
           );
-    final payload = where.isEmpty
+    // With no certificate the code would name http://, and the token in it
+    // would cross the network unencrypted. The server makes its certificate
+    // on its first start, so this is only an old data folder; loopback never
+    // leaves the machine and stays allowed. Card 1033.
+    final unencrypted =
+        widget.fingerprint == null &&
+        chosen != null &&
+        !(InternetAddress.tryParse(chosen.ip)?.isLoopback ?? false);
+    final payload = where.isEmpty || unencrypted
         ? null
         : pairingPayload(
             where,
@@ -230,15 +257,12 @@ class _TokenBodyState extends State<_TokenBody> {
                         PillButton(
                           label: 'Copy code',
                           icon: Icons.copy_all_outlined,
-                          onTap: () =>
-                              Clipboard.setData(ClipboardData(text: payload)),
+                          onTap: () => copySecret(payload),
                         ),
                       PillButton(
                         label: 'Copy token',
                         icon: Icons.copy_all_outlined,
-                        onTap: () => Clipboard.setData(
-                          ClipboardData(text: widget.device.token),
-                        ),
+                        onTap: () => copySecret(widget.device.token),
                       ),
                     ],
                   ),
@@ -269,7 +293,12 @@ class _TokenBodyState extends State<_TokenBody> {
           const SizedBox(height: 14),
         ],
         Text(
-          payload == null
+          unencrypted
+              ? 'Shown once. No code yet: this server has no certificate, so '
+                    'a code would carry the token across the network '
+                    'unencrypted. The server makes its certificate on its '
+                    'first start; start it once and open this again.'
+              : payload == null
               ? 'Shown once. No address on this network to put in a code — '
                     'the server is on loopback, so type the token in by hand.'
               : 'Scan on a phone. On a desktop, use Copy code and paste it '

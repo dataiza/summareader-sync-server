@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:summareader_ui/summareader_ui.dart';
 import 'package:summareader_sync_console/src/addresses.dart';
 import 'package:summareader_sync_console/src/config.dart';
@@ -521,13 +522,20 @@ void main() {
       token: 'a-token',
     );
 
-    Future<List<String>> open(WidgetTester tester, String addr) async {
+    Future<List<String>> open(
+      WidgetTester tester,
+      String addr, {
+      String? certificate = fingerprint,
+    }) async {
       final copied = <String>[];
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
         (call) async {
           if (call.method == 'Clipboard.setData') {
             copied.add((call.arguments as Map)['text'] as String);
+          }
+          if (call.method == 'Clipboard.getData') {
+            return {'text': copied.isEmpty ? null : copied.last};
           }
           return null;
         },
@@ -547,7 +555,7 @@ void main() {
                 device,
                 addr,
                 const [],
-                fingerprint: fingerprint,
+                fingerprint: certificate,
               ),
               child: const Text('open'),
             ),
@@ -570,6 +578,42 @@ void main() {
       expect(code['server'], 'https://10.10.20.1:8099');
       expect(code['device_token'], 'a-token');
       expect(code['server_fingerprint'], fingerprint);
+
+      // Card 1033: the code is a password, and the clipboard keeps it for any
+      // program that asks. A minute later it is gone.
+      await tester.pump(const Duration(seconds: 61));
+      expect(copied.last, isEmpty);
+    });
+
+    testWidgets('and the token, and leaves something copied since', (
+      tester,
+    ) async {
+      final copied = await open(tester, '10.10.20.1:8099');
+
+      await tester.tap(find.text('Copy token'));
+      await tester.pump();
+      expect(copied, ['a-token']);
+      await tester.pump(const Duration(seconds: 61));
+      expect(copied.last, isEmpty);
+
+      // Something the person copied after it is theirs, and stays.
+      await tester.tap(find.text('Copy token'));
+      await tester.pump();
+      copied.add('something else');
+      await tester.pump(const Duration(seconds: 61));
+      expect(copied.last, 'something else');
+    });
+
+    // Card 1033: without a certificate the code would name http://, and the
+    // token would cross the network in the clear.
+    testWidgets('with no certificate, draws no code for the network', (
+      tester,
+    ) async {
+      await open(tester, '10.10.20.1:8099', certificate: null);
+
+      expect(find.text('Copy code'), findsNothing);
+      expect(find.byType(QrImageView), findsNothing);
+      expect(find.textContaining('first start'), findsOneWidget);
     });
 
     testWidgets('with no address to name, offers the token alone', (
@@ -579,6 +623,39 @@ void main() {
 
       expect(find.text('Copy code'), findsNothing);
       expect(find.text('Copy token'), findsOneWidget);
+    });
+  });
+
+  // Card 1033: a release build runs nothing it found in whatever folder it
+  // was started from, because that binary is handed both tokens and that
+  // compose file is re-run at every login.
+  group('what is looked for in the working folder', () {
+    test('no server binary outside debug builds', () {
+      final release = serverCandidates(
+        '/opt/c',
+        'summareader-sync',
+        debug: false,
+      );
+      expect(release, everyElement(startsWith('/opt/c/')));
+      expect(
+        serverCandidates('/opt/c', 'summareader-sync', debug: true),
+        contains('./summareader-sync'),
+      );
+    });
+
+    test('and no compose file either', () {
+      final was = Directory.current;
+      final here = Directory.systemTemp.createTempSync('console-cwd');
+      addTearDown(() {
+        Directory.current = was;
+        here.deleteSync(recursive: true);
+      });
+      File('${here.path}/docker-compose.yml').writeAsStringSync('');
+      Directory.current = here;
+
+      const exe = '/nonexistent/bin/summareader-sync';
+      expect(composeFile(exe, '/nonexistent/data', debug: false), isNull);
+      expect(composeFile(exe, '/nonexistent/data', debug: true), isNotNull);
     });
   });
 
@@ -617,6 +694,19 @@ void main() {
       expect(() => saveConfig(dir.path, {'http': 'new:2'}), throwsException);
       expect(file.readAsStringSync(), broken);
     });
+
+    // Card 1029: the file holds the tokens, and a port change used to leave
+    // it at the umask's 0644 for every local user to read.
+    test('a save leaves the file readable by its owner alone', () {
+      final file = File(configPath(dir.path))
+        ..writeAsStringSync('{"operator_token":"secret"}');
+      Process.runSync('chmod', ['644', file.path]);
+
+      saveConfig(dir.path, {'http': 'a:1'});
+
+      expect(file.statSync().mode & 0x1ff, 0x180, reason: 'not 0600');
+      expect(readConfig(dir.path)['operator_token'], 'secret');
+    }, testOn: '!windows');
 
     test('the metrics token is never written by a rebind', () {
       saveConfig(dir.path, {'http': 'a:1'});
@@ -1153,6 +1243,8 @@ void _theTwoPages() {
                 updateOffer: (
                   version: '9.9.9',
                   image: Uri.parse('https://example.invalid/x.AppImage'),
+                  sums: null,
+                  signature: null,
                 ),
                 updateSaid: 'Downloading… 42%',
               ),

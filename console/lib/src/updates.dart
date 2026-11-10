@@ -15,9 +15,27 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' show sha256;
+import 'package:cryptography/cryptography.dart'
+    show Ed25519, KeyPairType, Signature, SimplePublicKey;
 import 'package:http/http.dart' as http;
 
 import 'version.dart';
+
+/// The public half of the key every release's `SHA256SUMS` is signed with,
+/// as SPKI DER in base64; the raw Ed25519 key is its last 32 bytes. Card 719.
+///
+/// The private half is the secret `UPDATE_SIGNING_KEY` in the
+/// summareader-sync-server repository, with an offline copy kept by its owner.
+/// Losing it means every installed console refuses every later update: a new
+/// public key can only arrive inside a release, and that release would be
+/// refused for not matching the old one. Everybody would then have to
+/// download a new console by hand.
+const updateSigningKey =
+    'MCowBQYDK2VwAyEAuQYebGUsRGmKBIvLbiw435axtf3NHmT1zhDO+ME+AQU=';
+
+/// [updateSigningKey] as the 32 bytes Ed25519 wants.
+final List<int> updatePublicKey = base64.decode(updateSigningKey).sublist(12);
 
 /// Where the running AppImage is, or null when this is not one.
 ///
@@ -32,8 +50,11 @@ String? runningImage([Map<String, String>? environment]) {
   return named != null && named.isNotEmpty ? named : null;
 }
 
-/// A release, reduced to the two things worth acting on.
-typedef Release = ({String version, Uri image});
+/// A release, reduced to the things worth acting on: its version, its image,
+/// and the signed manifest that vouches for the image (card 719). The manifest
+/// and its signature are null for a release made before releases were signed,
+/// which [replaceRunningImage] then refuses.
+typedef Release = ({String version, Uri image, Uri? sums, Uri? signature});
 
 /// Asks what the newest release is. An interface so a test can answer.
 abstract class Updates {
@@ -81,15 +102,26 @@ class GitHubUpdates implements Updates {
     // this file with a tarball would be worse than doing nothing.
     final assets = json['assets'];
     if (assets is! List) throw const FormatException('a release with no files');
+    final urls = <String, Uri>{};
     for (final asset in assets) {
       if (asset is! Map) continue;
       final name = asset['name'];
       final url = asset['browser_download_url'];
-      if (name is String && name.endsWith('.AppImage') && url is String) {
-        return (version: offered, image: Uri.parse(url));
-      }
+      if (name is String && url is String) urls[name] = Uri.parse(url);
     }
-    throw const FormatException('that release has no AppImage in it');
+    final image = [
+      for (final MapEntry(:key, :value) in urls.entries)
+        if (key.endsWith('.AppImage')) value,
+    ];
+    if (image.isEmpty) {
+      throw const FormatException('that release has no AppImage in it');
+    }
+    return (
+      version: offered,
+      image: image.first,
+      sums: urls['SHA256SUMS'],
+      signature: urls['SHA256SUMS.sig'],
+    );
   }
 }
 
@@ -187,6 +219,13 @@ bool isNewer(String offered, String mine) {
 /// than exceptions: an image somebody put in /opt, a machine with no network,
 /// a disk with no room.
 ///
+/// **Nothing is installed that the release's signed manifest does not vouch
+/// for** (card 719). The manifest is checked against [publicKey], which is
+/// [updatePublicKey] everywhere but a test, before the image is fetched; the
+/// image is then checked against its line in the manifest before it is made
+/// executable. A missing manifest is refused as firmly as a wrong one, because
+/// a hostile release would simply leave it out.
+///
 /// **Replacing the file a running program was started from is safe, and looks
 /// as though it should not be.** The kernel holds the old inode open for as
 /// long as this process lives, so the running console carries on out of a file
@@ -199,11 +238,22 @@ Future<String?> replaceRunningImage(
   String? imagePath,
   Map<String, String>? environment,
   void Function(int received, int? total)? onProgress,
+  List<int>? publicKey,
 }) async {
   final path = imagePath ?? runningImage(environment);
   if (path == null) {
     return 'This is not running as an AppImage, so there is nothing to '
         'replace. Nothing has been changed.';
+  }
+
+  final sums = release.sums, signature = release.signature;
+  if (sums == null || signature == null) {
+    return 'That release carries no signed checksum list, so there is no way '
+        'to tell it came from the people who make this console. Nothing has '
+        'been changed.';
+  }
+  for (final url in [release.image, sums, signature]) {
+    if (!fromGitHub(url)) return _offSite(url);
   }
 
   final image = File(path);
@@ -215,6 +265,44 @@ Future<String?> replaceRunningImage(
 
   try {
     final web = client ?? http.Client();
+
+    // The manifest first: it is a few hundred bytes, and a release that fails
+    // here has not cost anybody fifty megabytes.
+    final manifest = await web.get(sums);
+    final signed = await web.get(signature);
+    for (final answer in [manifest, signed]) {
+      if (answer.statusCode != 200) {
+        return 'The checksum list answered ${answer.statusCode}. Nothing has '
+            'been changed.';
+      }
+      if (answer case http.BaseResponseWithUrl(:final url)
+          when !fromGitHub(url)) {
+        return _offSite(url);
+      }
+    }
+    final genuine = await Ed25519().verify(
+      manifest.bodyBytes,
+      signature: Signature(
+        signed.bodyBytes,
+        publicKey: SimplePublicKey(
+          publicKey ?? updatePublicKey,
+          type: KeyPairType.ed25519,
+        ),
+      ),
+    );
+    if (!genuine) {
+      return 'The checksum list is not signed by the key this console trusts. '
+          'Nothing has been changed.';
+    }
+    final expected = expectedSum(
+      utf8.decode(manifest.bodyBytes, allowMalformed: true),
+      release.image.pathSegments.last,
+    );
+    if (expected == null) {
+      return 'The signed checksum list does not name '
+          '${release.image.pathSegments.last}. Nothing has been changed.';
+    }
+
     // Streamed rather than fetched whole, for two reasons: fifty megabytes of
     // image does not need to be in memory at once, and somebody watching a
     // progress line is the difference between "this is working" and "this has
@@ -224,6 +312,12 @@ Future<String?> replaceRunningImage(
     if (answer.statusCode != 200) {
       return 'The download answered ${answer.statusCode}. Nothing has been '
           'changed.';
+    }
+    // GitHub sends the asset from another host, and the client follows that
+    // on its own. Where it ended up is checked as well as where it started.
+    if (answer case http.BaseResponseWithUrl(:final url)
+        when !fromGitHub(url)) {
+      return _offSite(url);
     }
 
     final sink = partial.openWrite();
@@ -240,6 +334,20 @@ Future<String?> replaceRunningImage(
     if (received == 0) {
       if (partial.existsSync()) partial.deleteSync();
       return 'The download was empty. Nothing has been changed.';
+    }
+    // A connection that closed early ends the stream as quietly as one that
+    // finished. Card 1028.
+    final total = answer.contentLength;
+    if (total != null && received != total) {
+      partial.deleteSync();
+      return 'The download stopped at $received of $total bytes. Nothing has '
+          'been changed.';
+    }
+    final actual = (await sha256.bind(partial.openRead()).first).toString();
+    if (actual != expected) {
+      partial.deleteSync();
+      return 'The download does not match its signed checksum. Nothing has '
+          'been changed.';
     }
 
     await Process.run('chmod', ['755', partial.path]);
@@ -258,4 +366,26 @@ Future<String?> replaceRunningImage(
     if (partial.existsSync()) partial.deleteSync();
     return 'The download failed ($error). Nothing has been changed.';
   }
+}
+
+/// Whether [url] is https on GitHub, which is the only place a release of
+/// this console lives. The asset URL is on github.com and redirects to
+/// objects.githubusercontent.com, so both are needed. Card 1028.
+bool fromGitHub(Uri url) =>
+    url.scheme == 'https' &&
+    (url.host == 'github.com' || url.host == 'objects.githubusercontent.com');
+
+String _offSite(Uri url) =>
+    'The update would come from ${url.scheme}://${url.host}, which is not '
+    'GitHub over https. Nothing has been changed.';
+
+/// The lowercase hex SHA-256 that [manifest] gives for [name], or null when
+/// it names no such file. The manifest is what `sha256sum` writes: a hash, a
+/// space, a space or a star, and the name.
+String? expectedSum(String manifest, String name) {
+  for (final line in const LineSplitter().convert(manifest)) {
+    final match = RegExp(r'^([0-9a-fA-F]{64}) [ *](.+)$').firstMatch(line);
+    if (match != null && match[2] == name) return match[1]!.toLowerCase();
+  }
+  return null;
 }

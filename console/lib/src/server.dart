@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 
 import 'addresses.dart';
 import 'service.dart';
@@ -124,17 +125,29 @@ String? serverBinary() {
 
   final exe = Platform.isWindows ? 'summareader-sync.exe' : 'summareader-sync';
   final beside = File(Platform.resolvedExecutable).parent.path;
-  for (final candidate in [
-    '$beside/$exe',
-    '$beside/../$exe',
-    './$exe',
-    './dist/$exe',
-  ]) {
+  for (final candidate in serverCandidates(beside, exe)) {
     final file = File(candidate);
     if (file.existsSync()) return file.absolute.path;
   }
   return serverOnPath();
 }
+
+/// Where [serverBinary] looks before PATH: beside the console in [beside],
+/// and in the folder above it.
+///
+/// The working folder only in a debug build, where it is a checkout with a
+/// fresh `dist/` in it. Anywhere else it is whatever folder the console
+/// happened to be started from, and the binary found there is handed both
+/// tokens. Card 1033.
+List<String> serverCandidates(
+  String beside,
+  String exe, {
+  bool debug = kDebugMode,
+}) => [
+  '$beside/$exe',
+  '$beside/../$exe',
+  if (debug) ...['./$exe', './dist/$exe'],
+];
 
 /// The server binary on PATH, or null. Never inside an AppImage's mount,
 /// because the image's AppRun leaves PATH as it found it.

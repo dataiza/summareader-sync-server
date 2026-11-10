@@ -3,6 +3,14 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## Unreleased
+
+**The console checks an update before it installs it.** Each release now carries `SHA256SUMS`, a checksum of every file in it, and `SHA256SUMS.sig`, its Ed25519 signature. The Linux console installs an update only when the signature matches the key built into it and the downloaded AppImage matches its checksum. It also refuses a download that is not https from GitHub, or that stopped before its full length. A refused update changes nothing. **Releases before this one carry no signature**, so a console from before this change updates to it as before, and from then on refuses an unsigned release.
+
+**The config file is private.** A setting saved in the console leaves `summareader-sync.json` readable by its owner alone (0600), as the server already wrote it. The file can hold the operator and metrics tokens.
+
+**Three smaller gaps closed in the console.** A release build no longer runs a server binary or compose file found in the folder it was started from; it looks beside itself and on PATH. A server with no certificate yet gets no pairing code for the network, because the code would send the token unencrypted; the dialog says to start the server once. A copied pairing code or token is taken off the clipboard after a minute, unless something else was copied since.
+
 ## 1.4.1
 
 **The console AppImage no longer breaks the systemd unit.** A change of name, address, data directory or binary/container in the AppImage console rewrote the unit with the server inside the image, a path that is gone once the console closes, so the service did not come back at the next login. The rewrite now keeps the server the unit already names. A unit an older AppImage console broke this way gets the server on PATH or in `~/.local/bin`, and with neither the console says so and leaves the unit as it is.
