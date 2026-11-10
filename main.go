@@ -791,13 +791,23 @@ func handleWipe(e *core.RequestEvent) error {
 	if body.DeviceName == "" {
 		body.DeviceName = "another device"
 	}
+	// The cap a label has, checked before anything is deleted: a name past
+	// what the receipt can hold failed the wipe halfway. Card 1031.
+	if len([]rune(body.DeviceName)) > 200 {
+		return e.JSON(http.StatusBadRequest, map[string]string{
+			"error": "that device name is too long",
+		})
+	}
 
 	result, err := wipeAccount(e.App, accountID, body.DeviceName, body.Replacement)
 	if err != nil {
 		// Reports the partial result alongside the failure rather than a bare
 		// error: "we removed some of it" is actionable, "it failed" is not.
+		// The error itself goes to the log, since it can carry database text
+		// a device has no use for. Card 1031.
+		e.App.Logger().Error("could not wipe", "account", accountID, "error", err)
 		return e.JSON(http.StatusInternalServerError, map[string]any{
-			"error":  err.Error(),
+			"error":  "could not wipe everything",
 			"result": result,
 		})
 	}
@@ -1042,10 +1052,12 @@ func handleSetJoinVerifier(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
-// Either a signed join — nonce, key, signature — or, for a code made before
-// card 713, the proof alone. See join.go.
+// Either a signed join — nonce, key, signature, and "v2" in sign when the
+// signature names this server (card 1034) — or, for a code made before card
+// 713, the proof alone. See join.go.
 type joinRequest struct {
 	Proof     string `json:"proof"`
+	Sign      string `json:"sign"`
 	Nonce     string `json:"nonce"`
 	Key       string `json:"key"`
 	Signature string `json:"signature"`
@@ -1062,7 +1074,7 @@ func handleJoin(e *core.RequestEvent) error {
 	var device *Device
 	var err error
 	if body.Key != "" {
-		device, err = joinDeviceSigned(e.App, body.Nonce, body.Key, body.Signature, body.Label)
+		device, err = joinDeviceSigned(e.App, body.Sign, body.Nonce, body.Key, body.Signature, body.Label)
 	} else {
 		device, err = joinDevice(e.App, body.Proof, body.Label)
 	}

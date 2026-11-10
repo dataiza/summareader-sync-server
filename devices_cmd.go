@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -51,6 +53,17 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 		// started with --insecure-http.
 		if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 			base = "https://" + base
+		}
+		if strings.HasPrefix(base, "http://") && !loopbackURL(base) {
+			return nil, fmt.Errorf("refusing to send the token over plain http to %s; "+
+				"use https, or http only to this machine (127.0.0.1, ::1, localhost)", base)
+		}
+		if strings.TrimSpace(token) != "" {
+			// Said every time rather than once: the flag is how a token ends
+			// up in shell history and in ps for anyone on the machine. Card
+			// 1032.
+			fmt.Fprintln(os.Stderr, "warning: --token shows in ps and in shell history; "+
+				"set SUMMAREADER_OPERATOR_TOKEN instead")
 		}
 		client := &http.Client{Timeout: 5 * time.Second}
 		if strings.HasPrefix(base, "https://") {
@@ -263,10 +276,25 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 	devices.PersistentFlags().StringVar(&addr, "addr", "",
 		"the running server, default the configured bind address")
 	devices.PersistentFlags().StringVar(&token, "token", "",
-		"the operator token, default $SUMMAREADER_OPERATOR_TOKEN")
+		"the operator token; prefer $SUMMAREADER_OPERATOR_TOKEN, since a flag shows in ps and shell history")
 	devices.PersistentFlags().BoolVar(&asJSON, "json", false,
 		"print the result as JSON")
 
 	devices.AddCommand(list, rename, revoke, resume, remove)
 	app.RootCmd.AddCommand(devices)
+}
+
+// loopbackURL says whether a URL names this machine, the one place a token can
+// go over plain http without crossing a network. Card 1032.
+func loopbackURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

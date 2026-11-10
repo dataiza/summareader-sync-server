@@ -243,33 +243,38 @@ func headSeq(app core.App, accountID string) (int64, error) {
 // putBlob stores content-addressed bytes. Idempotent: the name is derived from
 // the content, so re-uploading is a no-op rather than a duplicate.
 func putBlob(app core.App, accountID, name, payload string) error {
-	existing, _ := app.FindFirstRecordByFilter(
-		collBlobs,
-		"account = {:account} && name = {:name}",
-		dbx.Params{"account": accountID, "name": name},
-	)
-	if existing != nil {
-		return nil
-	}
+	// One transaction, as appendEntry is, so parallel uploads under a ceiling
+	// cannot each be told there is room the others are about to take. Card
+	// 1031.
+	return app.RunInTransaction(func(tx core.App) error {
+		existing, _ := tx.FindFirstRecordByFilter(
+			collBlobs,
+			"account = {:account} && name = {:name}",
+			dbx.Params{"account": accountID, "name": name},
+		)
+		if existing != nil {
+			return nil
+		}
 
-	// After the dedup check: re-uploading what is already stored adds no
-	// bytes, so a full account must still be allowed to do it. Refusing there
-	// would break recovery-blob refresh for the account least able to spare
-	// the room.
-	if err := checkQuota(app, accountID, len(payload)); err != nil {
-		return err
-	}
+		// After the dedup check: re-uploading what is already stored adds no
+		// bytes, so a full account must still be allowed to do it. Refusing
+		// there would break recovery-blob refresh for the account least able
+		// to spare the room.
+		if err := checkQuota(tx, accountID, len(payload)); err != nil {
+			return err
+		}
 
-	collection, err := app.FindCollectionByNameOrId(collBlobs)
-	if err != nil {
-		return err
-	}
+		collection, err := tx.FindCollectionByNameOrId(collBlobs)
+		if err != nil {
+			return err
+		}
 
-	record := core.NewRecord(collection)
-	record.Set("account", accountID)
-	record.Set("name", name)
-	record.Set("payload", payload)
-	return app.Save(record)
+		record := core.NewRecord(collection)
+		record.Set("account", accountID)
+		record.Set("name", name)
+		record.Set("payload", payload)
+		return tx.Save(record)
+	})
 }
 
 func getBlob(app core.App, accountID, name string) (string, error) {

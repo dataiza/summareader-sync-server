@@ -209,3 +209,24 @@ func TestTheRateLimitForgetsAfterItsWindow(t *testing.T) {
 		t.Fatal("still refused after the window")
 	}
 }
+
+// Card 1031: the name a wiping device sends is capped as a label is, and a
+// name past it is refused before anything is deleted.
+func TestAWipeWithAnOverlongNameIsRefused(t *testing.T) {
+	app, _ := newTestApp(t)
+	desktop, err := createAccount(app, "Mine", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := appendEntry(app, desktop.AccountID, desktop.DeviceID, "kept"); err != nil {
+		t.Fatal(err)
+	}
+	mux := builtinsMux(t, app)
+	body := `{"device_name":"` + strings.Repeat("é", 201) + `"}`
+	if res := askAs(mux, desktop.Token, http.MethodPost, "/wipe", body); res.Code != http.StatusBadRequest {
+		t.Fatalf("/wipe with a 201-rune name answered %d", res.Code)
+	}
+	if head, err := headSeq(app, desktop.AccountID); err != nil || head != 1 {
+		t.Fatalf("the log was touched: head %d, %v", head, err)
+	}
+}

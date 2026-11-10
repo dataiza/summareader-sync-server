@@ -3,6 +3,17 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## Unreleased
+
+- **A join signature can name the server.** The `/join/nonce` reply now says `"sign": "v2"`, and a join that sends `"sign": "v2"` is checked against a signature over this server's instance id and the nonce, so a signature a hostile server or a man in the middle relays from elsewhere opens nothing. A join without the field is checked as before, for apps that do not send it yet.
+- **A legacy recovery proof joins once.** A code made before signed joins still lets a device in, but the server clears its verifier in the same join, and the app sets a signed one straight after. An app too old to do that leaves the code unable to join until a paired device makes a new one.
+- **Join nonces are limited to ten a minute per address**, and a full store drops the nonce nearest its end instead of refusing every join for two minutes. Behind a reverse proxy, set PocketBase's trusted proxy headers; RUNNING.md says how.
+- **`/wipe` no longer sends database error text back**, keeps the partial result beside a fixed message, and refuses a device name over 200 characters before deleting anything.
+- **The longest `/subscribe` hold is four minutes**, under PocketBase's write timeout of five, so a full hold ends in an answer rather than a reset.
+- **Parallel blob uploads cannot overshoot an account's ceiling**: the check and the save are one transaction, as appends already were.
+- **The Docker build sees only the Go module.** A `.dockerignore` keeps `pb_data/`, with its database and TLS key, out of the build context and cache.
+- **`devices` refuses plain http to anything but this machine**, and warns on stderr when the token is passed as `--token` rather than through `SUMMAREADER_OPERATOR_TOKEN`.
+
 ## 1.4.1
 
 **The console AppImage no longer breaks the systemd unit.** A change of name, address, data directory or binary/container in the AppImage console rewrote the unit with the server inside the image, a path that is gone once the console closes, so the service did not come back at the next login. The rewrite now keeps the server the unit already names. A unit an older AppImage console broke this way gets the server on PATH or in `~/.local/bin`, and with neither the console says so and leaves the unit as it is.

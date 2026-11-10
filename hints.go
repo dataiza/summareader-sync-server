@@ -116,9 +116,12 @@ const defaultHold = 45 * time.Second
 // A negative number is outside it and means "do not wait at all", restoring
 // the old answer-at-once behaviour for a deployment that cannot hold a
 // connection open.
+// The top is a minute under PocketBase's write timeout of five. At five, a
+// hold that ran its full length answered after the deadline, and the device
+// got a reset where it expected {"head":n}. Card 1031.
 const (
 	minHold = 5 * time.Second
-	maxHold = 5 * time.Minute
+	maxHold = 4 * time.Minute
 )
 
 // holdFor turns the configured number into a duration.

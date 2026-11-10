@@ -138,7 +138,10 @@ A recovery code made before this still works, but the first join with it
 sends the proof it was made with as it is, and an old proof may have been
 captured while it crossed the network in the clear. The app replaces it with a
 signed one the moment such a join lets it in; making a new recovery code in
-the app does the same straight away.
+the app does the same straight away. The server also clears the old proof's
+verifier in that same join, so it opens the account once and never again. An
+app too old to put a signed one in its place leaves the code unable to join
+until a paired device makes a new one.
 
 ## What the devices hear
 
@@ -421,11 +424,28 @@ the container the host is not "this machine" either: Docker relays the
 connection from its bridge, so the dashboard is out of reach there, and the
 `superuser` and backup commands through `docker compose exec` are what is left.
 
+A relay on the same machine that adds no forwarding header does open it.
+`ssh -R`, socat, stunnel or any layer-4 proxy hands the server a connection
+from 127.0.0.1 with nothing to say whom it carries, so the dashboard and
+`/api/` answer whoever reaches the relay. The superuser login, at five tries a
+minute, is then all that stands in the way. Put an HTTP reverse proxy there
+instead, or keep such a relay off any port the network can reach.
+
 Logging in to the dashboard is limited to five attempts a minute per address,
-and the users collection PocketBase creates for itself is closed: nothing here
+asking for a join nonce to ten, and the users collection PocketBase creates for itself is closed: nothing here
 signs anybody up, and left open it let anyone create accounts until the disk
 was full. Both are put back on every start. No web page may call the server
 either — CORS is off unless `serve --origins` names the pages that may.
+
+**Behind a reverse proxy those limits are per proxy, not per client.**
+PocketBase counts by the connection's address unless its trusted proxy
+headers are set, and through a proxy every connection is the proxy's, so ten
+joins a minute is ten for everybody together. Set them in the dashboard under
+Settings › Application › IP proxy headers › Trusted IP proxy headers, to the
+header the proxy writes (`X-Forwarded-For` or `X-Real-IP`), with IP priority
+at "Use rightmost IP" so the address the proxy appended is the one used. Only with a proxy in front: set
+on a server the network reaches directly, the header is whatever a client
+writes, and the limits stop applying.
 
 **What an admin interface here can and cannot do is decided by the encryption,
 not by effort.** The server holds opaque ciphertext and no keys. So it can:

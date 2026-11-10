@@ -127,3 +127,15 @@ func TestHowLongToHold(t *testing.T) {
 		t.Fatalf("the default hold must stay under a minute, it is %s", defaultHold)
 	}
 }
+
+// Card 1031: the longest hold has to be answered before PocketBase's write
+// deadline, or the device gets a reset where it expected {"head":n}. The
+// deadline is a literal in apis.Serve (WriteTimeout: 5 * time.Minute in
+// v0.39), not an exported constant, so it is copied here; check it again
+// when PocketBase is upgraded.
+func TestTheLongestHoldEndsBeforeTheWriteDeadline(t *testing.T) {
+	const writeTimeout = 5 * time.Minute
+	if maxHold >= writeTimeout {
+		t.Fatalf("maxHold %s is not below the write timeout %s", maxHold, writeTimeout)
+	}
+}

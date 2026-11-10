@@ -270,3 +270,20 @@ func TestTheOperatorCanIssueATokenIntoTheOneLibrary(t *testing.T) {
 		t.Fatalf("the issued token does not resolve: %v", err)
 	}
 }
+
+// Card 1032: the devices command sends the operator token over plain http
+// only to this machine.
+func TestPlainHTTPIsOnlyForThisMachine(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:8090":      true,
+		"http://[::1]:8090":          true,
+		"http://localhost:8090":      true,
+		"http://192.0.2.10:8090":     false,
+		"http://sync.example.com":    false,
+		"http://localhost.evil.test": false,
+	} {
+		if got := loopbackURL(raw); got != want {
+			t.Errorf("loopbackURL(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}

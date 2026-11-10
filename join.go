@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -31,7 +30,8 @@ import (
 //
 // Codes made before this hold a hash of the proof. Those still join the old
 // way, because the app cannot change what an existing code is; the app swaps
-// the verifier for a signed one as soon as such a join lets it in.
+// the verifier for a signed one as soon as such a join lets it in. Since card
+// 1035 the server clears it in the same join, so the proof works only once.
 
 // What a signed verifier starts with. A legacy verifier is unpadded base64 of
 // a SHA-256, which can never contain a colon, so the two cannot be confused.
@@ -60,8 +60,6 @@ func newNonceStore(ttl time.Duration, max int) *nonceStore {
 	return &nonceStore{issued: map[string]time.Time{}, ttl: ttl, max: max, now: time.Now}
 }
 
-var errTooManyNonces = errors.New("too many joins in progress")
-
 func (s *nonceStore) issue() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -79,8 +77,20 @@ func (s *nonceStore) issue() (string, error) {
 			}
 		}
 	}
+	// Still full: the nonce nearest its end makes room, rather than the new
+	// one being refused. Refusing let one flood keep every real join out for
+	// the whole two minutes; this costs a flooder's own nonces first, since
+	// they are most of what is held. Card 1030.
+	// ponytail: a linear scan over at most max entries, under the lock; a heap
+	// if max ever grows past a few thousand.
 	if len(s.issued) >= s.max {
-		return "", errTooManyNonces
+		soonest := ""
+		for n, expires := range s.issued {
+			if soonest == "" || expires.Before(s.issued[soonest]) {
+				soonest = n
+			}
+		}
+		delete(s.issued, soonest)
 	}
 	s.issued[nonce] = now.Add(s.ttl)
 	return nonce, nil
@@ -99,17 +109,43 @@ func (s *nonceStore) take(nonce string) bool {
 	return !s.now().After(expires)
 }
 
+// Limited per address by nonceRateLimit in lockdown.go, card 1030.
 func handleJoinNonce(e *core.RequestEvent) error {
 	nonce, err := joinNonces.issue()
 	if err != nil {
-		return e.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "too many joins in progress — try again in a minute",
+		e.App.Logger().Error("could not make a join nonce", "error", err)
+		return e.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "could not make a nonce",
 		})
 	}
 	return e.JSON(http.StatusOK, map[string]any{
 		"nonce":      nonce,
 		"expires_in": int(nonceTTL.Seconds()),
+		// Tells an app this server checks the bound signature. Card 1034.
+		"sign": joinSignV2,
 	})
+}
+
+// The bound signature, card 1034.
+//
+// A v1 join signs the nonce alone, which says nothing about which server
+// asked: a hostile server, or anybody in the middle of an --insecure-http
+// connection, could pass on a real server's nonce, have the device sign it,
+// and join the real server with the result. A v2 join signs this server's
+// instance id beside the nonce, the one /instance answers with and the app
+// pinned when it paired, so a signature made for one server opens no other.
+// The prefix keeps a v1 signature from ever reading as a v2 one.
+//
+// v1 is still accepted when the request does not say v2, because a server
+// and the apps that use it are updated separately. Refusing it waits until
+// the oldest app in use sends v2.
+const joinSignV2 = "v2"
+
+func joinMessage(app core.App, sign, nonce string) []byte {
+	if sign == joinSignV2 {
+		return []byte("summareader-join-v2\n" + instanceId(app) + "\n" + nonce)
+	}
+	return []byte(nonce)
 }
 
 // joinDeviceSigned issues a token to a device that signed a fresh nonce with
@@ -117,7 +153,7 @@ func handleJoinNonce(e *core.RequestEvent) error {
 //
 // The nonce is spent before anything else is looked at, so a wrong signature
 // costs the caller the nonce as well, and nothing is created on any failure.
-func joinDeviceSigned(app core.App, nonce, key, signature, label string) (*Device, error) {
+func joinDeviceSigned(app core.App, sign, nonce, key, signature, label string) (*Device, error) {
 	if !joinNonces.take(nonce) {
 		return nil, ErrNoAccount
 	}
@@ -126,7 +162,7 @@ func joinDeviceSigned(app core.App, nonce, key, signature, label string) (*Devic
 		return nil, ErrNoAccount
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(signature))
-	if err != nil || !ed25519.Verify(public, []byte(nonce), sig) {
+	if err != nil || !ed25519.Verify(public, joinMessage(app, sign, nonce), sig) {
 		return nil, ErrNoAccount
 	}
 	record, err := app.FindFirstRecordByFilter(

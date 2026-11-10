@@ -1,0 +1,11 @@
+# What the Docker build may see: the Go module and nothing else. Card 1032.
+#
+# The build stage copies the whole context, and a working tree here usually
+# has pb_data/ beside it, with the database, the TLS key and the config. The
+# final image never held them, but the daemon and its build cache did. A list
+# of what is allowed rather than of what is not, so the next secret somebody
+# leaves in the directory is kept out without anybody remembering to add it.
+*
+!go.mod
+!go.sum
+!*.go
