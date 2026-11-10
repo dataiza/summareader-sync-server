@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
+
 import 'addresses.dart';
 
 /// Leaving the server running when the console is closed, as a systemd *user*
@@ -328,8 +330,12 @@ Future<void> writePrivate(File file, String text) async {
 
 /// chmod 600, and a refusal rather than a shrug when it fails: a unit that is
 /// still readable by everybody is the thing this exists to prevent.
-Future<void> narrow(String path) async {
-  final result = await Process.run('chmod', ['600', path]);
+Future<void> narrow(String path) async => narrowSync(path);
+
+/// [narrow] for a caller that cannot wait, which is `saveConfig` (card 1029).
+/// A chmod is over before anybody could see the window stop.
+void narrowSync(String path) {
+  final result = Process.runSync('chmod', ['600', path]);
   if (result.exitCode != 0) {
     throw Exception('chmod 600 $path: ${'${result.stderr}'.trim()}');
   }
@@ -352,13 +358,17 @@ Future<void> uninstallService() async {
 /// the console offers the container choice only when there is something to
 /// start. Beside the binary first, then beside the data directory, which are
 /// the two places a copy of the repository puts it.
-String? composeFile(String exe, String dir) {
+///
+/// The working folder only in a debug build (card 1033): the unit re-runs
+/// whatever compose file this names at every login, and the folder the
+/// console was started from is nobody's choice.
+String? composeFile(String exe, String dir, {bool debug = kDebugMode}) {
   final near = File(exe).parent;
   for (final candidate in [
     '${near.path}/docker-compose.yml',
     '${near.parent.path}/docker-compose.yml',
     '${Directory(dir).parent.path}/docker-compose.yml',
-    'docker-compose.yml',
+    if (debug) 'docker-compose.yml',
   ]) {
     final file = File(candidate);
     if (file.existsSync()) return file.absolute.path;

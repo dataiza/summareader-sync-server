@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'service.dart' show narrowSync;
+
 /// The server's config file, from the console's side.
 ///
 /// Same file, same keys, same precedence as the Go binary reads: a flag beats
@@ -50,6 +52,12 @@ void saveConfig(String dir, Map<String, dynamic> updates) {
 
   file.parent.createSync(recursive: true);
   final tmp = File('${file.path}.tmp');
+  // Created empty and narrowed before it holds anything, the way
+  // `writePrivate` writes the unit: the file carries the operator and metrics
+  // tokens, and the Go side writes it 0600 too. Card 1029. Windows has no
+  // chmod, and keeps a profile's files to its owner by itself.
+  tmp.writeAsStringSync('');
+  if (!Platform.isWindows) narrowSync(tmp.path);
   tmp.writeAsStringSync(
     '${const JsonEncoder.withIndent('  ').convert(values)}\n',
   );

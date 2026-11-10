@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' show sha256;
+import 'package:cryptography/cryptography.dart' show Ed25519, SimpleKeyPair;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -24,7 +26,64 @@ String _release(String tag, {List<String> assets = const ['x.AppImage']}) =>
       ],
     });
 
+const _base =
+    'https://github.com/dataiza/summareader-sync-server/releases/download/v9.9.9';
+
+/// A release laid out the way the release workflow lays one out: the image,
+/// and beside it the checksum list and its signature. Card 719.
+final Release _signedRelease = (
+  version: '9.9.9',
+  image: Uri.parse('$_base/SummaReaderSync-9.9.9-x86_64.AppImage'),
+  sums: Uri.parse('$_base/SHA256SUMS'),
+  signature: Uri.parse('$_base/SHA256SUMS.sig'),
+);
+
+/// A throwaway key pair, so the tests sign as the release workflow does
+/// without the real key, and the public half they pass as the trusted one.
+late SimpleKeyPair _signer;
+late List<int> _trusted;
+
+/// A fake GitHub serving [_signedRelease] with [body] as the image.
+///
+/// The checksum list is right for [body] unless [manifest] says otherwise,
+/// and signed by [_signer] unless [signer] says otherwise. [length] is the
+/// length the image's answer claims, which is the body's unless given.
+Future<http.Client> _serving(
+  String body, {
+  String? manifest,
+  SimpleKeyPair? signer,
+  int? length,
+}) async {
+  final name = _signedRelease.image.pathSegments.last;
+  final sums = manifest ?? '${sha256.convert(utf8.encode(body))}  $name\n';
+  final signature = await Ed25519().sign(
+    utf8.encode(sums),
+    keyPair: signer ?? _signer,
+  );
+  return MockClient.streaming((request, _) async {
+    http.StreamedResponse answer(List<int> bytes, {int? claimed}) =>
+        http.StreamedResponse(
+          Stream.value(bytes),
+          200,
+          contentLength: claimed ?? bytes.length,
+          request: request,
+        );
+    final url = request.url;
+    if (url == _signedRelease.sums) return answer(utf8.encode(sums));
+    if (url == _signedRelease.signature) return answer(signature.bytes);
+    if (url == _signedRelease.image) {
+      return answer(utf8.encode(body), claimed: length);
+    }
+    return http.StreamedResponse(const Stream.empty(), 404, request: request);
+  });
+}
+
 void main() {
+  setUpAll(() async {
+    _signer = await Ed25519().newKeyPair();
+    _trusted = (await _signer.extractPublicKey()).bytes;
+  });
+
   group('which version is newer', () {
     test('by components, not by how the string sorts', () {
       // The whole reason this is not a string comparison: "0.10.0" sorts
@@ -64,6 +123,17 @@ void main() {
       final found = await ask(_release('v99.0.0'));
       expect(found?.version, '99.0.0');
       expect(found?.image.toString(), endsWith('.AppImage'));
+    });
+
+    test('and with the checksum list and its signature beside it', () async {
+      final found = await ask(
+        _release(
+          'v99.0.0',
+          assets: ['x.AppImage', 'SHA256SUMS', 'SHA256SUMS.sig'],
+        ),
+      );
+      expect(found?.sums?.pathSegments.last, 'SHA256SUMS');
+      expect(found?.signature?.pathSegments.last, 'SHA256SUMS.sig');
     });
 
     test('the version this console already is, is not', () async {
@@ -108,29 +178,41 @@ void main() {
       expect(runningImage(const {}), isNull);
       expect(runningImage(const {'APPIMAGE': ''}), isNull);
 
-      final refusal = await replaceRunningImage((
-        version: '9.9.9',
-        image: Uri.parse('https://example.invalid/x'),
-      ), environment: const {});
+      final refusal = await replaceRunningImage(
+        _signedRelease,
+        environment: const {},
+      );
       expect(refusal, contains('not running as an AppImage'));
     });
   });
 
   group('replacing the image', () {
     late Directory dir;
+    late File image;
 
-    setUp(() => dir = Directory.systemTemp.createTempSync('appimage'));
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('appimage');
+      image = File('${dir.path}/SummaReader.AppImage')
+        ..writeAsStringSync('the old one');
+    });
     tearDown(() => dir.deleteSync(recursive: true));
 
-    test('the new bytes end up at the path that was running', () async {
-      final image = File('${dir.path}/SummaReader.AppImage')
-        ..writeAsStringSync('the old one');
+    Future<String?> replace(http.Client client, {Release? release}) =>
+        replaceRunningImage(
+          release ?? _signedRelease,
+          client: client,
+          imagePath: image.path,
+          publicKey: _trusted,
+        );
 
-      final refusal = await replaceRunningImage(
-        (version: '9.9.9', image: Uri.parse('https://example.invalid/new')),
-        client: MockClient((_) async => http.Response('the new one', 200)),
-        imagePath: image.path,
-      );
+    /// What every refusal must leave: the old image, and nothing beside it.
+    void untouched() {
+      expect(image.readAsStringSync(), 'the old one');
+      expect(File('${image.path}.new').existsSync(), isFalse);
+    }
+
+    test('the new bytes end up at the path that was running', () async {
+      final refusal = await replace(await _serving('the new one'));
 
       expect(refusal, isNull);
       expect(image.readAsStringSync(), 'the new one');
@@ -142,32 +224,141 @@ void main() {
     });
 
     test('a download that fails leaves the old one alone', () async {
-      final image = File('${dir.path}/SummaReader.AppImage')
-        ..writeAsStringSync('the old one');
-
-      final refusal = await replaceRunningImage(
-        (version: '9.9.9', image: Uri.parse('https://example.invalid/new')),
-        client: MockClient((_) async => http.Response('nope', 404)),
-        imagePath: image.path,
+      final refusal = await replace(
+        MockClient((_) async => http.Response('nope', 404)),
       );
 
       expect(refusal, contains('404'));
-      expect(image.readAsStringSync(), 'the old one');
-      expect(File('${image.path}.new').existsSync(), isFalse);
+      untouched();
     });
 
     test('an empty download is refused rather than written', () async {
-      final image = File('${dir.path}/SummaReader.AppImage')
-        ..writeAsStringSync('the old one');
-
-      final refusal = await replaceRunningImage(
-        (version: '9.9.9', image: Uri.parse('https://example.invalid/new')),
-        client: MockClient((_) async => http.Response('', 200)),
-        imagePath: image.path,
-      );
+      final refusal = await replace(await _serving(''));
 
       expect(refusal, contains('empty'));
-      expect(image.readAsStringSync(), 'the old one');
+      untouched();
+    });
+
+    // Card 719: the signature is what tells a release from somebody else's.
+    test('an image that is not the one the list names is refused', () async {
+      final name = _signedRelease.image.pathSegments.last;
+      final refusal = await replace(
+        await _serving(
+          'a hostile one',
+          manifest: '${sha256.convert(utf8.encode('the new one'))}  $name\n',
+        ),
+      );
+
+      expect(refusal, contains('does not match its signed checksum'));
+      untouched();
+    });
+
+    test('a list signed by another key is refused', () async {
+      final refusal = await replace(
+        await _serving('the new one', signer: await Ed25519().newKeyPair()),
+      );
+
+      expect(refusal, contains('not signed by the key'));
+      untouched();
+    });
+
+    test('a release with no signed list is refused', () async {
+      final refusal = await replace(
+        await _serving('the new one'),
+        release: (
+          version: '9.9.9',
+          image: _signedRelease.image,
+          sums: null,
+          signature: null,
+        ),
+      );
+
+      expect(refusal, contains('no signed checksum list'));
+      untouched();
+    });
+
+    test('and so is one whose list is named and not there', () async {
+      final client = await _serving('the new one');
+      final refusal = await replace(
+        MockClient.streaming(
+          (request, body) async => request.url == _signedRelease.sums
+              ? http.StreamedResponse(const Stream.empty(), 404)
+              : client.send(http.Request(request.method, request.url)),
+        ),
+      );
+
+      expect(refusal, contains('404'));
+      untouched();
+    });
+
+    test('a list that does not name the image is refused', () async {
+      final refusal = await replace(
+        await _serving('the new one', manifest: '${'0' * 64}  other.tar.gz\n'),
+      );
+
+      expect(refusal, contains('does not name'));
+      untouched();
+    });
+
+    // Card 1028. The claimed length is larger than the body: a short stream
+    // with no length claimed would prove nothing.
+    test('a download that stops short of its length is refused', () async {
+      final refusal = await replace(
+        await _serving('the new one', length: 'the new one'.length + 100),
+      );
+
+      expect(refusal, contains('stopped at 11 of 111 bytes'));
+      untouched();
+    });
+
+    test('an image anywhere but GitHub over https is refused', () async {
+      for (final where in [
+        'https://example.com/x.AppImage',
+        'http://github.com/x.AppImage',
+      ]) {
+        final refusal = await replace(
+          await _serving('the new one'),
+          release: (
+            version: '9.9.9',
+            image: Uri.parse(where),
+            sums: _signedRelease.sums,
+            signature: _signedRelease.signature,
+          ),
+        );
+        expect(refusal, contains('not GitHub over https'), reason: where);
+        untouched();
+      }
+    });
+
+    test('and so is a checksum list', () async {
+      final refusal = await replace(
+        await _serving('the new one'),
+        release: (
+          version: '9.9.9',
+          image: _signedRelease.image,
+          sums: Uri.parse('http://github.com/SHA256SUMS'),
+          signature: _signedRelease.signature,
+        ),
+      );
+
+      expect(refusal, contains('not GitHub over https'));
+      untouched();
+    });
+
+    test('the release asset host and its redirect target are GitHub', () {
+      expect(fromGitHub(_signedRelease.image), isTrue);
+      expect(
+        fromGitHub(Uri.parse('https://objects.githubusercontent.com/x')),
+        isTrue,
+      );
+      expect(
+        fromGitHub(Uri.parse('https://github.com.example.com/x')),
+        isFalse,
+      );
+    });
+
+    test('the built-in key is the 32 bytes Ed25519 wants', () {
+      expect(updatePublicKey, hasLength(32));
     });
   });
 
@@ -452,7 +643,8 @@ void main() {
               'HOME': dir.path,
               'XDG_DATA_HOME': '',
             },
-            client: MockClient((_) async => http.Response('the new one', 200)),
+            client: await tester.runAsync(() => _serving('the new one')),
+            updateKey: _trusted,
           ),
         ),
       );
@@ -462,10 +654,7 @@ void main() {
       // real disk work does not finish on a pump. The rename is the last step
       // before the state is set, so waiting for it is waiting for the update.
       await tester.runAsync(() async {
-        view(tester).onDownloadUpdate!((
-          version: '9.9.9',
-          image: Uri.parse('https://example.invalid/x.AppImage'),
-        ));
+        view(tester).onDownloadUpdate!(_signedRelease);
         while (!renamed.existsSync()) {
           await Future<void>.delayed(const Duration(milliseconds: 5));
         }

@@ -30,6 +30,7 @@ class ConsoleScreen extends StatefulWidget {
     this.client,
     this.environment,
     this.install = false,
+    this.updateKey,
   });
 
   /// Whether the console was started with `--install` (card 1007): the menu
@@ -43,6 +44,10 @@ class ConsoleScreen extends StatefulWidget {
   /// a stand-in for both.
   final http.Client? client;
   final Map<String, String>? environment;
+
+  /// The key an update's checksum list must be signed with. Null everywhere
+  /// but a test, which cannot sign with the real one and so brings its own.
+  final List<int>? updateKey;
 
   /// Where the database is when the window opens. Mutable afterwards — see
   /// `_dir` in the state, which is what everything reads once somebody has
@@ -573,6 +578,7 @@ class _ConsoleScreenState extends State<ConsoleScreen>
         release,
         client: widget.client,
         environment: widget.environment,
+        publicKey: widget.updateKey,
         onProgress: (received, total) {
           if (!mounted || total == null || total <= 0) return;
           final percent = (received * 100 ~/ total).clamp(0, 100);

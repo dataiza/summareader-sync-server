@@ -598,6 +598,52 @@ jobs:
     permissions:
       contents: write
     steps:
+      # A checksum of every file in the release, signed with the update key
+      # (card 719). The Linux console installs an update only when this
+      # signature matches the public key built into it, and the AppImage
+      # matches its line. Here, after every build has uploaded, so the list
+      # covers all of them.
+      #
+      # The private key is the secret UPDATE_SIGNING_KEY; its owner keeps the
+      # offline copy. It is on disk for this step alone, 0600 under umask 077,
+      # and removed by the trap however the step ends. The signature is then
+      # checked against the public key the console carries, so a wrong secret
+      # fails here rather than in every console that tries to update.
+      - name: Sign the checksum list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/update-signing.pem"
+          trap 'rm -f "$key"' EXIT
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::error::the UPDATE_SIGNING_KEY secret is empty"
+            exit 1
+          fi
+          printf '%s\n' "$UPDATE_SIGNING_KEY" >"$key"
+          printf '%s\n' '-----BEGIN PUBLIC KEY-----' \
+            'MCowBQYDK2VwAyEAuQYebGUsRGmKBIvLbiw435axtf3NHmT1zhDO+ME+AQU=' \
+            '-----END PUBLIC KEY-----' >"$RUNNER_TEMP/update-signing.pub"
+
+          dir="$RUNNER_TEMP/assets"
+          mkdir -p "$dir"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --dir "$dir" --clobber
+          # A re-run finds the last attempt's list among the assets.
+          rm -f "$dir/SHA256SUMS" "$dir/SHA256SUMS.sig"
+          (cd "$dir" && sha256sum -- *) >"$RUNNER_TEMP/SHA256SUMS"
+          cat "$RUNNER_TEMP/SHA256SUMS"
+
+          cd "$RUNNER_TEMP"
+          openssl pkeyutl -sign -rawin -inkey "$key" \
+            -in SHA256SUMS -out SHA256SUMS.sig
+          openssl pkeyutl -verify -rawin -pubin -inkey update-signing.pub \
+            -in SHA256SUMS -sigfile SHA256SUMS.sig
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS SHA256SUMS.sig \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
       - name: Check what is there, then un-draft it
         env:
           GH_TOKEN: ${{ github.token }}
@@ -612,7 +658,10 @@ jobs:
           # .AppImage among them: it is the download a person actually takes
           # on Linux, and the only one that can update itself. A release
           # missing it would quietly send everyone back to unpacking tarballs.
-          for want in headless-linux-amd64 console-linux-x64 console-windows-x64 .AppImage; do
+          # The checksum list and its signature too: without them every
+          # console refuses the update (card 719).
+          for want in headless-linux-amd64 console-linux-x64 console-windows-x64 .AppImage \
+            'SHA256SUMS$' 'SHA256SUMS\.sig$'; do
             echo "$assets" | grep -q "$want" || {
               echo "::error::nothing matching $want was uploaded"
               exit 1

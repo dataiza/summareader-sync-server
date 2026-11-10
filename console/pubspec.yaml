@@ -30,6 +30,10 @@ dependencies:
   # Card 713. Dart's own libraries have no hash function.
   crypto: ^3.0.7
 
+  # Ed25519, for the signature on each release's checksum list (card 719).
+  # Dart's own libraries have no signature scheme; the same major as the app's.
+  cryptography: ^2.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
