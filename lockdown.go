@@ -25,12 +25,23 @@ import (
 // dictionary.
 var authRateLimit = core.RateLimitRule{Label: "*:auth", MaxRequests: 5, Duration: 60}
 
+// What one address may ask of the join nonce route: ten a minute. A device
+// asks for one nonce per join, and the route takes no credential, so without
+// this one client could fill the server's store of nonces. Card 1030.
+//
+// Per address as PocketBase sees it, which behind a reverse proxy is the
+// proxy's unless its trusted proxy headers are set; RUNNING.md says how.
+var nonceRateLimit = core.RateLimitRule{Label: "GET /join/nonce", MaxRequests: 10, Duration: 60}
+
+// The rules the lockdown puts back on every boot.
+var lockedRateLimits = []core.RateLimitRule{authRateLimit, nonceRateLimit}
+
 // lockDownBuiltins closes what PocketBase leaves open, on every boot.
 //
 // Every boot rather than once, because the settings live in the database and
 // the dashboard can change them: a limit switched off by accident should not
-// stay off. Only the rule for logging in is put back — any other limit an
-// operator has added is theirs.
+// stay off. Only the rules in lockedRateLimits are put back — any other
+// limit an operator has added is theirs.
 func lockDownBuiltins(app core.App) error {
 	// The users collection PocketBase creates for itself. Nothing here signs
 	// anybody up — a device is a row in devices with a token, see provision.go
@@ -52,23 +63,25 @@ func lockDownBuiltins(app core.App) error {
 	limits := &settings.RateLimits
 	changed := !limits.Enabled
 	limits.Enabled = true
-	found := false
-	for i, rule := range limits.Rules {
-		if rule.Label != authRateLimit.Label {
-			continue
+	for _, want := range lockedRateLimits {
+		found := false
+		for i, rule := range limits.Rules {
+			if rule.Label != want.Label {
+				continue
+			}
+			found = true
+			if rule != want {
+				limits.Rules[i] = want
+				changed = true
+			}
 		}
-		found = true
-		if rule != authRateLimit {
-			limits.Rules[i] = authRateLimit
+		if !found {
+			// First, though the order matters less than it looks: PocketBase
+			// matches a collection's own labels, then the wildcard ones, then
+			// paths, whatever order the list is in.
+			limits.Rules = append([]core.RateLimitRule{want}, limits.Rules...)
 			changed = true
 		}
-	}
-	if !found {
-		// First, though the order matters less than it looks: PocketBase
-		// matches a collection's own labels, then the wildcard ones, then
-		// paths, whatever order the list is in.
-		limits.Rules = append([]core.RateLimitRule{authRateLimit}, limits.Rules...)
-		changed = true
 	}
 	if !changed {
 		return nil

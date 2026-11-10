@@ -267,19 +267,36 @@ func joinDevice(app core.App, proof, label string) (*Device, error) {
 	sum := sha256.Sum256([]byte(proof))
 	verifier := base64.RawURLEncoding.EncodeToString(sum[:])
 
-	record, err := app.FindFirstRecordByFilter(
-		collAccounts,
-		"join_verifier = {:verifier} && join_verifier != ''",
-		dbx.Params{"verifier": verifier},
-	)
-	if err != nil || record == nil {
-		return nil, ErrNoAccount
+	// The proof opens the account once. Its verifier is cleared in the same
+	// transaction as the enrolment, so a proof somebody saw on its way, over
+	// --insecure-http for one, is spent with the join it came in. The app sets
+	// a signed verifier for the same code with the token it has just been
+	// given. Looked up inside the transaction, so two joins with one proof
+	// cannot both find it. Card 1035.
+	var device *Device
+	err := app.RunInTransaction(func(tx core.App) error {
+		record, err := tx.FindFirstRecordByFilter(
+			collAccounts,
+			"join_verifier = {:verifier} && join_verifier != ''",
+			dbx.Params{"verifier": verifier},
+		)
+		if err != nil || record == nil {
+			return ErrNoAccount
+		}
+		record.Set("join_verifier", "")
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		// The same enrolment an existing device would have performed, so a
+		// joined device is an ordinary device: revocable, listable, nothing
+		// special about how it got here. See joinAccount.
+		device, err = joinAccount(tx, record.Id, label)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// The same enrolment an existing device would have performed, so a joined
-	// device is an ordinary device: revocable, listable, nothing special about
-	// how it got here. See joinAccount.
-	return joinAccount(app, record.Id, label)
+	return device, nil
 }
 
 // listDevices returns an account's devices, without their tokens.

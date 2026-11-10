@@ -162,6 +162,16 @@ rather than matched, since a filter on the verifier alone would match all of
 them at once. Nothing is created on a failure and the device is not touched, so
 the column never becomes a record of who has been guessing.
 
+That hash is the legacy form. A code made since card 713 stands for an Ed25519
+key, the verifier is its public half, and a join signs a nonce from
+`GET /join/nonce`, good once for two minutes and limited to ten a minute per
+address (card 1030). With `"sign": "v2"`, which the nonce reply offers, the
+signed bytes are `"summareader-join-v2\n" + instance + "\n" + nonce`, the
+instance being what `/instance` answers, so a signature relayed from another
+server opens nothing here (card 1034); without it the bare nonce is checked, for
+apps that predate v2. A legacy proof joins once: its verifier is cleared in the
+same transaction, and the app puts a signed one in its place (card 1035).
+
 `/rename` exists because a label is otherwise written once, at enrolment, by
 whichever device minted the token. That suits a phone somebody is holding and
 not a headless one — an MCP mirror in a container has a name in its config and,

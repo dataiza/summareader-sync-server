@@ -46,15 +46,32 @@ func TestANonceExpires(t *testing.T) {
 }
 
 // The endpoint takes no credential, so it must not be a way to fill memory.
+// Full, it drops the nonce nearest its end rather than refusing, so a flood
+// cannot keep a real join out for the whole two minutes. Card 1030.
 func TestOutstandingNoncesAreBounded(t *testing.T) {
+	now := time.Now()
 	store := newNonceStore(time.Minute, 3)
+	store.now = func() time.Time { return now }
+	issued := []string{}
 	for i := 0; i < 3; i++ {
-		if _, err := store.issue(); err != nil {
+		nonce, err := store.issue()
+		if err != nil {
 			t.Fatal(err)
 		}
+		issued = append(issued, nonce)
+		now = now.Add(time.Second)
 	}
-	if _, err := store.issue(); err == nil {
-		t.Fatal("a fourth nonce was issued past the bound")
+	if _, err := store.issue(); err != nil {
+		t.Fatalf("a full store refused a new nonce: %v", err)
+	}
+	if len(store.issued) != 3 {
+		t.Fatalf("%d nonces held, want the bound of 3", len(store.issued))
+	}
+	if store.take(issued[0]) {
+		t.Fatal("the nonce nearest its end was kept")
+	}
+	if !store.take(issued[1]) || !store.take(issued[2]) {
+		t.Fatal("a later nonce was dropped instead of the oldest")
 	}
 }
 
@@ -201,5 +218,120 @@ func TestABareProofCannotJoinASignedVerifier(t *testing.T) {
 	body := `{"proof":"` + strings.TrimPrefix(verifier, signedVerifierPrefix) + `"}`
 	if res := ask(mux, http.MethodPost, "/join", fromLAN, body); res.Code != http.StatusUnauthorized {
 		t.Fatalf("a bare proof against a signed verifier answered %d", res.Code)
+	}
+}
+
+// Card 1030: the nonce route takes no credential, so one address asking for
+// nonces as fast as it can is limited, and somebody else still gets one.
+func TestNonceRequestsAreLimitedPerAddress(t *testing.T) {
+	app, _ := newTestApp(t)
+	mux := builtinsMux(t, app)
+	limited := false
+	for i := 0; i < 30 && !limited; i++ {
+		limited = ask(mux, http.MethodGet, "/join/nonce", fromLAN, "").Code == http.StatusTooManyRequests
+	}
+	if !limited {
+		t.Fatal("thirty nonces in a row from one address and none was refused")
+	}
+	if code := ask(mux, http.MethodGet, "/join/nonce", "192.0.2.99:40000", "").Code; code != http.StatusOK {
+		t.Fatalf("another address answered %d after the first was limited", code)
+	}
+}
+
+// signV2 is what an app that knows the server signs. Card 1034.
+func signV2(key ed25519.PrivateKey, instance, nonce string) string {
+	message := "summareader-join-v2\n" + instance + "\n" + nonce
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(message)))
+}
+
+func joinBodyWith(key ed25519.PrivateKey, nonce, signature, sign string) string {
+	fields := map[string]string{
+		"nonce":     nonce,
+		"key":       base64.RawURLEncoding.EncodeToString(key.Public().(ed25519.PublicKey)),
+		"signature": signature,
+		"label":     "Restored phone",
+	}
+	if sign != "" {
+		fields["sign"] = sign
+	}
+	encoded, _ := json.Marshal(fields)
+	return string(encoded)
+}
+
+// Card 1034: a v2 signature names the server it was made for, so one relayed
+// from another server does not open this one, and a bare v1 signature cannot
+// be passed off as v2.
+func TestAV2JoinIsBoundToThisServer(t *testing.T) {
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "Mine", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := joinKey(t)
+	if err := setJoinVerifier(app, account.AccountID, signedVerifier(key)); err != nil {
+		t.Fatal(err)
+	}
+	mux := builtinsMux(t, app)
+	instance := instanceId(app)
+	if instance == "" {
+		t.Fatal("the test server has no instance id")
+	}
+
+	res := ask(mux, http.MethodGet, "/join/nonce", fromLAN, "")
+	var offer struct {
+		Sign string `json:"sign"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &offer); err != nil || offer.Sign != "v2" {
+		t.Fatalf("the nonce reply does not offer v2: %s", res.Body.String())
+	}
+
+	nonce := fetchNonce(t, mux)
+	body := joinBodyWith(key, nonce, signV2(key, "another-server", nonce), "v2")
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, body); res.Code != http.StatusUnauthorized {
+		t.Fatalf("a v2 signature for another server answered %d", res.Code)
+	}
+
+	nonce = fetchNonce(t, mux)
+	v1 := base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(nonce)))
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, joinBodyWith(key, nonce, v1, "v2")); res.Code != http.StatusUnauthorized {
+		t.Fatalf("a v1 signature sent as v2 answered %d", res.Code)
+	}
+
+	nonce = fetchNonce(t, mux)
+	body = joinBodyWith(key, nonce, signV2(key, instance, nonce), "v2")
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, body); res.Code != http.StatusOK {
+		t.Fatalf("a v2 signature for this server answered %d: %s", res.Code, res.Body.String())
+	}
+
+	// And an app that only knows v1 still gets in.
+	nonce = fetchNonce(t, mux)
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, joinBodyWith(key, nonce, v1Sig(key, nonce), "")); res.Code != http.StatusOK {
+		t.Fatalf("a v1 join without the field answered %d", res.Code)
+	}
+}
+
+func v1Sig(key ed25519.PrivateKey, nonce string) string {
+	return base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(nonce)))
+}
+
+// Card 1035: a legacy proof opens the account once. The verifier goes with
+// the join, so a proof somebody saw on its way cannot be sent again; the app
+// sets a signed verifier with the token it just got.
+func TestALegacyProofJoinsOnlyOnce(t *testing.T) {
+	app, _ := newTestApp(t)
+	account, err := createAccount(app, "Mine", "Desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setJoinVerifier(app, account.AccountID, verifierFor("the-proof")); err != nil {
+		t.Fatal(err)
+	}
+	mux := builtinsMux(t, app)
+	body := `{"proof":"the-proof","label":"Old app"}`
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, body); res.Code != http.StatusOK {
+		t.Fatalf("a legacy join answered %d", res.Code)
+	}
+	if res := ask(mux, http.MethodPost, "/join", fromLAN, body); res.Code != http.StatusUnauthorized {
+		t.Fatalf("the same proof joined twice: %d", res.Code)
 	}
 }

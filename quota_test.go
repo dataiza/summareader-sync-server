@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -196,5 +198,29 @@ func TestAnAccountThatIsNotThereIsStillErrNoAccount(t *testing.T) {
 
 	if err := checkQuota(app, "nosuchaccount00", 10); !errors.Is(err, ErrNoAccount) {
 		t.Fatalf("an unknown account: err = %v, want ErrNoAccount", err)
+	}
+}
+
+// Card 1031: uploads in parallel under a ceiling each see the room the others
+// are about to take unless the check and the save are one transaction.
+func TestParallelBlobsCannotOvershootTheCeiling(t *testing.T) {
+	app, account := newTestApp(t)
+	setQuota(t, app, account, 100)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = putBlob(app, account, fmt.Sprintf("blob-%d", i), strings.Repeat("x", 60))
+		}(i)
+	}
+	wg.Wait()
+	used, err := usageFor(app, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used > 100 {
+		t.Fatalf("%d bytes stored under a ceiling of 100", used)
 	}
 }
