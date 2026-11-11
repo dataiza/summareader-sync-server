@@ -275,8 +275,9 @@ Future<String?> replaceRunningImage(
         return 'The checksum list answered ${answer.statusCode}. Nothing has '
             'been changed.';
       }
-      if (answer case http.BaseResponseWithUrl(:final url)
-          when !fromGitHub(url)) {
+      if (answer case http.BaseResponseWithUrl(
+        :final url,
+      ) when !fromGitHub(url)) {
         return _offSite(url);
       }
     }
@@ -315,8 +316,9 @@ Future<String?> replaceRunningImage(
     }
     // GitHub sends the asset from another host, and the client follows that
     // on its own. Where it ended up is checked as well as where it started.
-    if (answer case http.BaseResponseWithUrl(:final url)
-        when !fromGitHub(url)) {
+    if (answer case http.BaseResponseWithUrl(
+      :final url,
+    ) when !fromGitHub(url)) {
       return _offSite(url);
     }
 
