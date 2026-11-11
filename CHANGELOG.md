@@ -3,7 +3,7 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 1.5.0
 
 - **A join signature can name the server.** The `/join/nonce` reply now says `"sign": "v2"`, and a join that sends `"sign": "v2"` is checked against a signature over this server's instance id and the nonce, so a signature a hostile server or a man in the middle relays from elsewhere opens nothing. A join without the field is checked as before, for apps that do not send it yet.
 - **A legacy recovery proof joins once.** A code made before signed joins still lets a device in, but the server clears its verifier in the same join, and the app sets a signed one straight after. An app too old to do that leaves the code unable to join until a paired device makes a new one.
