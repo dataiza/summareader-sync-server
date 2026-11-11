@@ -3,6 +3,10 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.5.1
+
+**The console builds again.** The AppImage build now uses the appimagetool that the app has used since 2026-11-06; upstream rebuilt it, and 1.5.0 stopped at the checksum before anything was published. This release carries everything listed under 1.5.0.
+
 ## 1.5.0
 
 - **A join signature can name the server.** The `/join/nonce` reply now says `"sign": "v2"`, and a join that sends `"sign": "v2"` is checked against a signature over this server's instance id and the nonce, so a signature a hostile server or a man in the middle relays from elsewhere opens nothing. A join without the field is checked as before, for apps that do not send it yet.

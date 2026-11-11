@@ -30,12 +30,15 @@ id=sk.dataiza.summareader_sync_console
 # the point: the alternative is silently building with a tool nobody chose.
 #
 # When that happens, check what changed upstream and put the new hash here.
-# Last moved 2026-11-01: upstream's CI rebuilt `continuous` from 4919cc4,
+# Moved 2026-11-01: upstream's CI rebuilt `continuous` from 4919cc4,
 # fifteen commits by its maintainers: a new logging system, a memory-leak
 # fix, and AppDir checks where only essential problems are errors. The
 # 0.138.0 and 1.3.0 releases stopped here.
+# Last moved 2026-11-11: rebuilt from 11d54c9, one commit that reads ELF
+# section headers in the file's own byte order. The app moved to this build
+# on 2026-11-06; this copy was missed, and 1.5.0 stopped here.
 tool_url=https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-tool_sha=62aebc77c2149e96b593b94da9bbd1881e0984a56399ff6d7a03b7ddd7c9ce68
+tool_sha=e8c1169c4af66c3184d7ee110713d4be04befe671fa358e2c1591ee840553b03
 tool="${APPIMAGETOOL:-${XDG_CACHE_HOME:-$HOME/.cache}/summareader/appimagetool}"
 
 if [ ! -x "$tool" ]; then
