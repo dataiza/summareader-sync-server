@@ -9,3 +9,5 @@
 !go.mod
 !go.sum
 !*.go
+# Embedded into the binary with go:embed; a build without it does not compile.
+!pairpage.html
