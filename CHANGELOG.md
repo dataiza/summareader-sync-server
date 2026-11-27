@@ -3,6 +3,10 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.7.0
+
+- **The Helm chart can put the pairing page behind an Ingress with a public certificate.** `pairIngress.enabled` adds an Ingress carrying only `/pair` and `/operator/pairing`, with a certificate from cert-manager (`pairIngress.clusterIssuer`), so a browser shows no warning. Sync never goes through it: devices keep the server's own pinned certificate, and the QR the page draws names `publicURL`, which the chart requires with it. `service.annotations` tells the ingress controller to reach the pod over HTTPS; RUNNING.md has the Traefik example. Keep that host on the LAN. Docker and the binary are unchanged.
+
 ## 1.6.0
 
 - **Pair a device from a browser.** `/pair` shows the pairing QR code a phone scans: *Create first device* while the server has no library, *Add a device* after. Its password is the operator token (`SUMMAREADER_OPERATOR_TOKEN`); without one the page is off. It answers only over TLS, keeps the password in memory, loads nothing from elsewhere, and is never cached. It cannot make a second library: with more than one it refuses.
