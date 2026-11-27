@@ -3,6 +3,14 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 1.6.0
+
+- **Pair a device from a browser.** `/pair` shows the pairing QR code a phone scans: *Create first device* while the server has no library, *Add a device* after. Its password is the operator token (`SUMMAREADER_OPERATOR_TOKEN`); without one the page is off. It answers only over TLS, keeps the password in memory, loads nothing from elsewhere, and is never cached. It cannot make a second library: with more than one it refuses.
+- **A Helm chart**, in `helm/summareader-sync/`: one replica on a ReadWriteOnce volume, a LoadBalancer Service on 443 and 8099, `hostNetwork` (on by default) so the server can announce itself, and `service.labels` for LB-IPAM pools that select by label. `scripts/push-image.sh` builds and pushes the image at the chart's version.
+- **`announce_ip`** (`--announce-ip`, `SUMMAREADER_ANNOUNCE_IP`): the address announced on the local network. Set it to a LoadBalancer IP so discovery names an address that does not move with the pod.
+- **`public_url`** (`--public-url`, `SUMMAREADER_PUBLIC_URL`): the address a pairing code carries, for a server that cannot know how devices reach it. Unset, it is the address the browser used.
+- **README: server and devices on different networks.** mDNS stays on one network segment; the section says how to repeat it on EdgeOS, UniFi, OPNsense/pfSense and Avahi, and which ports to open.
+
 ## 1.5.1
 
 **The console builds again.** The AppImage build now uses the appimagetool that the app has used since 2026-11-06; upstream rebuilt it, and 1.5.0 stopped at the checksum before anything was published. This release carries everything listed under 1.5.0.
