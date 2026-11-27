@@ -1,0 +1,31 @@
+image:
+  repository: 10.34.1.1:30095/summareader-sync
+  tag: ""  # empty means the chart's appVersion
+
+# The server announces itself over mDNS, which only leaves a pod that shares the node's network.
+# true: announce the LoadBalancer IP (service.loadBalancerIP), and the namespace must allow hostNetwork
+# (pod-security "privileged"). false: no announcement; devices use the address typed or scanned.
+hostNetwork: true
+
+service:
+  loadBalancerIP: ""  # rendered as the Cilium LB-IPAM annotation; also what is announced over mDNS
+  hostname: summareader-sync  # rendered as the k8s-gateway DNS name
+
+publicURL: ""  # the address a pairing QR carries, e.g. https://summareader-sync.example:8099; empty means the request's Host
+
+operatorToken:
+  secretName: ""  # required, an existing Secret with key operator-token; the chart never creates one. It is the /pair password.
+
+metricsToken:
+  secretName: ""  # optional, an existing Secret with key metrics-token; empty leaves /metrics off
+
+persistence:
+  size: 1Gi  # the database; the only thing worth backing up
+  storageClass: ""  # empty means the cluster default
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

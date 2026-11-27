@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "summareader-sync.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.service.loadBalancerIP }}
+    lbipam.cilium.io/ips: {{ . }}
+    {{- end }}
+    coredns.io/hostname: {{ .Values.service.hostname }}
+spec:
+  type: LoadBalancer
+  selector:
+    {{- include "summareader-sync.selector" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 8099
+      targetPort: https

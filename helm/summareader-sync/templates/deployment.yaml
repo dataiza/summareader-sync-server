@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "summareader-sync.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # SQLite on a ReadWriteOnce volume, so two pods must never overlap.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "summareader-sync.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "summareader-sync.labels" . | nindent 8 }}
+    spec:
+      # Kubernetes injects <SERVICE>_PORT for every Service; ours is named summareader-sync, which would give the pod
+      # SUMMAREADER_SYNC_PORT=tcp://<ip>:8099 in its environment. Nothing needs it, so keep the environment ours.
+      enableServiceLinks: false
+      {{- if .Values.hostNetwork }}
+      # mDNS only leaves a pod on the node's network. ClusterFirstWithHostNet keeps cluster DNS working there.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001  # makes the mounted volume writable for the non-root user
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          command: ["summareader-sync", "serve", "--http=0.0.0.0:8099", "--dir=/data"]
+          env:
+            {{- $secret := required "operatorToken.secretName is required" .Values.operatorToken.secretName }}
+            - name: SUMMAREADER_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret | quote }}
+                  key: operator-token
+            {{- with .Values.metricsToken.secretName }}
+            - name: SUMMAREADER_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: metrics-token
+            {{- end }}
+            {{- with .Values.publicURL }}
+            - name: SUMMAREADER_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.hostNetwork }}
+            - name: SUMMAREADER_ANNOUNCE_IP  # the stable address, not whichever node the pod landed on
+              value: {{ .Values.service.loadBalancerIP | quote }}
+            {{- else }}
+            - name: SUMMAREADER_NO_ANNOUNCE  # a pod network does not carry multicast to the LAN
+              value: "1"
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: 8099
+          # The server terminates TLS itself (self-signed, pinned by the app), so the probes speak HTTPS.
+          readinessProbe:
+            httpGet:
+              path: /instance
+              port: https
+              scheme: HTTPS
+          livenessProbe:
+            httpGet:
+              path: /instance
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 30  # the first start migrates the schema
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}
+        - name: tmp
+          emptyDir: {}

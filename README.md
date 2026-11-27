@@ -236,6 +236,39 @@ docker compose exec sync summareader-sync first-device "My library" "Desktop" --
 docker compose logs -f
 ```
 
+### Kubernetes
+
+The Helm chart is in `helm/summareader-sync/`. Values, the pod-security
+requirement and first pairing are in
+[RUNNING.md](RUNNING.md#kubernetes).
+
+### Server and devices on different networks
+
+mDNS reaches one network segment only, so a server on another VLAN or subnet
+than the devices is not discovered unless the router repeats mDNS between them.
+The address itself still works when typed or scanned from a pairing code.
+
+Turn on the repeater for both networks:
+
+- **EdgeRouter / EdgeOS:** `set service mdns repeater interface <iface>` for each
+  network, then `commit ; save`.
+- **UniFi:** the Multicast DNS setting on the networks involved.
+- **OPNsense / pfSense:** the `mdns-repeater` or Avahi package, with both
+  interfaces selected.
+- **Linux router:** `avahi-daemon` with `enable-reflector=yes` in
+  `/etc/avahi/avahi-daemon.conf`.
+
+Then check the rest:
+
+- The firewall allows UDP 5353 between the networks, and TCP 8099 from the
+  devices to the server.
+- In Kubernetes the pod needs `hostNetwork: true` and `announce_ip` set to the
+  LoadBalancer IP; the chart does both.
+- In Docker the container needs `network_mode: host`, or the announcement does
+  not leave the host.
+
+Details: [Finding it on a local network](RUNNING.md#finding-it-on-a-local-network).
+
 ---
 
 More: [BUILD.md](BUILD.md) (building) · [RUNNING.md](RUNNING.md) (running,
