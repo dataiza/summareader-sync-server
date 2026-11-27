@@ -302,10 +302,11 @@ The metrics token, when a unit is installed, is read back out of that unit
 rather than minted fresh. A new token against a full server reads as zero
 devices, which looks exactly like a server nobody has ever paired with.
 
-The QR code the console draws carries the address and a token —
-`{"version":2,"server":…,"device_token":…}` — and deliberately **no key**,
-unlike the app's own pairing code. It is what typing those two things by hand
-would say, in a form a camera can read.
+The QR code the console draws carries the address, a token and the
+certificate's fingerprint —
+`{"version":2,"server":…,"device_token":…,"server_fingerprint":…}` — and
+deliberately **no key**, unlike the app's own pairing code. It is what typing
+those things by hand would say, in a form a camera can read.
 
 ## Pairing from a browser
 

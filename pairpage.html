@@ -78,7 +78,8 @@ server log before trusting either.</p>
     try { response = await call("GET"); } catch { return show($("login-error"), "The server did not answer."); }
     if (response.status === 401) { password = ""; return show($("login-error"), "Wrong password."); }
     if (!response.ok) { password = ""; return show($("login-error"), "The server said " + response.status + "."); }
-    const state = await response.json();
+    const state = await response.json().catch(() => null);
+    if (!state) { password = ""; return show($("login-error"), "The server said " + response.status + "."); }
     $("password").value = "";
     $("state-fingerprint").textContent = grouped(state.fingerprint);
     $("pair-button").textContent = state.libraries === 0 ? "Create first device" : "Add a device";

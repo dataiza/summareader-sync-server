@@ -252,19 +252,34 @@ func TestTwoFirstPressesMakeOneLibrary(t *testing.T) {
 	app := emptyTestApp(t)
 	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
 	var wg sync.WaitGroup
-	for range 2 {
+	codes := make([]int, 2)
+	for i := range codes {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = callPairing(t, app, handlePairingCode, http.MethodPost, "h", "op", `{}`)
+			recorder, err := callPairing(t, app, handlePairingCode, http.MethodPost, "h", "op", `{}`)
+			if err == nil {
+				codes[i] = recorder.Code
+			}
 		}()
 	}
 	wg.Wait()
-	total, err := app.CountRecords(collAccounts)
+	// Both answered, so neither press lost to a busy database.
+	if codes[0] != http.StatusOK || codes[1] != http.StatusOK {
+		t.Fatalf("answers were %v", codes)
+	}
+	accounts := []*core.Record{}
+	if err := app.RecordQuery(collAccounts).All(&accounts); err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("%d libraries", len(accounts))
+	}
+	devices, err := listDevices(app, accounts[0].Id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 1 {
-		t.Fatalf("%d libraries", total)
+	if len(devices) != 2 {
+		t.Fatalf("%d devices", len(devices))
 	}
 }
