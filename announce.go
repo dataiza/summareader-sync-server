@@ -26,7 +26,11 @@ const serviceType = "_summareader-sync._tcp"
 // server that failed to announce still syncs perfectly well for anyone who
 // knows its address, and refusing to start because a multicast socket could
 // not be opened would trade the whole feature for the convenience.
-func announce(addr, instance string) func() {
+//
+// A non-empty ip is announced in place of the machine's own addresses. On a
+// host-networked pod those belong to whichever node it landed on and change
+// when it moves; a load balancer's IP does not.
+func announce(addr, instance, ip string) func() {
 	port, err := portOf(addr)
 	if err != nil {
 		log.Printf("not announcing on the network: %v", err)
@@ -41,27 +45,32 @@ func announce(addr, instance string) func() {
 		instance = host
 	}
 
-	server, err := zeroconf.Register(
-		instance,
-		serviceType,
-		"local.",
-		port,
-		// What a client learns before connecting. Deliberately nothing about
-		// the data: this is broadcast to every machine on the network, so it
-		// carries what is needed to reach the server and not one field more.
-		//
-		// The scheme since card 713: every connection is TLS now, and a
-		// device that found this server and spoke plain HTTP to it would be
-		// refused. Its absence is how an older server says http.
-		[]string{"software=summareader-sync-server", "scheme=https"},
-		nil,
-	)
+	// What a client learns before connecting. Deliberately nothing about
+	// the data: this is broadcast to every machine on the network, so it
+	// carries what is needed to reach the server and not one field more.
+	//
+	// The scheme since card 713: every connection is TLS now, and a
+	// device that found this server and spoke plain HTTP to it would be
+	// refused. Its absence is how an older server says http.
+	txt := []string{"software=summareader-sync-server", "scheme=https"}
+
+	var server *zeroconf.Server
+	if ip == "" {
+		server, err = zeroconf.Register(instance, serviceType, "local.", port, txt, nil)
+	} else {
+		server, err = zeroconf.RegisterProxy(instance, serviceType, "local.", port,
+			"summareader-sync", []string{ip}, txt, nil)
+	}
 	if err != nil {
 		log.Printf("not announcing on the network: %v", err)
 		return func() {}
 	}
 
-	log.Printf("announcing %q on the local network as %s", instance, serviceType)
+	if ip != "" {
+		log.Printf("announcing %q on the local network as %s at %s", instance, serviceType, ip)
+	} else {
+		log.Printf("announcing %q on the local network as %s", instance, serviceType)
+	}
 	return server.Shutdown
 }
 

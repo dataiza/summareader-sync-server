@@ -174,6 +174,8 @@ A server with no config file behaves exactly as it did before there was one.
 | `--dir` | `SUMMAREADER_DIR` | `dir` | where the database lives |
 | — | `SUMMAREADER_METRICS_TOKEN` | `metrics_token` | the credential `/metrics` wants; empty means the endpoint is off |
 | `--no-announce` | `SUMMAREADER_NO_ANNOUNCE` | `no_announce` | do not advertise on the local network |
+| `--announce-ip` | `SUMMAREADER_ANNOUNCE_IP` | `announce_ip` | announce this IP instead of the machine's own (behind a load balancer) |
+| `--public-url` | `SUMMAREADER_PUBLIC_URL` | `public_url` | the address a pairing code carries, e.g. `https://sync.example:8099` |
 | `--insecure-http` | `SUMMAREADER_INSECURE_HTTP` | `insecure_http` | also answer plain HTTP beside HTTPS on the same port, for apps not yet updated; one transition release |
 | `--supervisor-pid` | — | — | stop when that process is gone; the console passes its own pid so a killed window does not leave a server behind |
 | `--config` | `SUMMAREADER_CONFIG` | — | where the file itself is |

@@ -45,6 +45,16 @@ type Config struct {
 	Name string `json:"name,omitempty"`
 	// Do not advertise this server on the local network.
 	NoAnnounce bool `json:"no_announce,omitempty"`
+	// The IP to announce over mDNS instead of this machine's own addresses.
+	//
+	// Behind a load balancer on a host-networked pod, the addresses the pod
+	// can see are a node's, and they change when the pod moves; the balancer's
+	// IP does not. Empty announces the machine's own, as before.
+	AnnounceIP string `json:"announce_ip,omitempty"`
+	// The address a pairing code carries, as a device should reach this
+	// server: scheme, host and port, no path. Empty falls back to the host the
+	// request arrived on, which is right only when nothing rewrites it.
+	PublicURL string `json:"public_url,omitempty"`
 	// Also answer plain HTTP beside TLS, for devices whose app predates card
 	// 713. Here as well as on the command line so that a server installed as
 	// a unit can be given it without rewriting the unit.
@@ -169,6 +179,12 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := strings.TrimSpace(getenv("SUMMAREADER_NAME")); v != "" {
 		cfg.Name = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_ANNOUNCE_IP")); v != "" {
+		cfg.AnnounceIP = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_PUBLIC_URL")); v != "" {
+		cfg.PublicURL = v
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)

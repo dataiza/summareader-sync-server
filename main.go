@@ -38,6 +38,13 @@ var supervisorPID int
 // sit in.
 var noAnnounce bool
 
+// Set by --announce-ip: the address mDNS carries instead of the machine's own.
+var announceIP string
+
+// Set by --public-url: the address a pairing code names. Read by the pairing
+// page, not by anything here.
+var publicURL string
+
 // Held for the life of the process. See the comment in OnServe.
 var stopAnnouncing = func() {}
 
@@ -109,7 +116,7 @@ func main() {
 		// success in the log and was invisible to every browser on the
 		// network. The process exiting is what withdraws it.
 		if !noAnnounce {
-			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName)
+			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName, announceIP)
 		}
 
 		// TLS on the listener rather than through PocketBase's own https
@@ -168,6 +175,14 @@ func main() {
 	app.RootCmd.PersistentFlags().BoolVar(&noAnnounce, "no-announce",
 		settings.NoAnnounce,
 		"do not advertise this server on the local network")
+
+	// Both on the root for the reason above.
+	app.RootCmd.PersistentFlags().StringVar(&announceIP, "announce-ip",
+		settings.AnnounceIP,
+		"announce this IP on the local network instead of the machine's own")
+	app.RootCmd.PersistentFlags().StringVar(&publicURL, "public-url",
+		settings.PublicURL,
+		"the address a pairing code carries, e.g. https://sync.example:8099")
 
 	// Who to stop with. A persistent flag on the root for the reason above, and
 	// passed only by a console that started this server as its own child — a

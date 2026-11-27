@@ -328,3 +328,22 @@ func TestInsecureHTTPComesFromTheFileOrTheEnvironment(t *testing.T) {
 		t.Fatal("the environment did not win over the file")
 	}
 }
+
+func TestAnnounceIPAndPublicURL(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, `{"announce_ip":"10.0.0.9","public_url":"https://file:1"}`)
+	cfg, err := resolveConfig([]string{"x", "serve", "--dir=" + dir}, envOf(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AnnounceIP != "10.0.0.9" || cfg.PublicURL != "https://file:1" {
+		t.Fatalf("file was not read: %+v", cfg)
+	}
+	cfg, _ = resolveConfig([]string{"x", "serve", "--dir=" + dir}, envOf(map[string]string{
+		"SUMMAREADER_ANNOUNCE_IP": " 10.39.20.12 ",
+		"SUMMAREADER_PUBLIC_URL":  "https://summareader-sync.test.home.p4ulie.net:8099",
+	}))
+	if cfg.AnnounceIP != "10.39.20.12" || cfg.PublicURL != "https://summareader-sync.test.home.p4ulie.net:8099" {
+		t.Fatalf("environment did not win: %+v", cfg)
+	}
+}
