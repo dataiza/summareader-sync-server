@@ -13,6 +13,7 @@ Building any of them is [BUILD.md](BUILD.md).
 - [What the devices hear](#what-the-devices-hear)
 - [Configuration](#configuration)
 - [The desktop console](#the-desktop-console)
+- [Pairing from a browser](#pairing-from-a-browser)
 - [Docker](#docker)
 - [Leaving it running](#leaving-it-running)
 - [Finding it on a local network](#finding-it-on-a-local-network)
@@ -305,6 +306,45 @@ The QR code the console draws carries the address and a token —
 `{"version":2,"server":…,"device_token":…}` — and deliberately **no key**,
 unlike the app's own pairing code. It is what typing those two things by hand
 would say, in a form a camera can read.
+
+## Pairing from a browser
+
+A server with no console beside it — in a container, in Kubernetes, on a box
+in a cupboard — draws the same pairing code at `/pair`:
+
+```
+https://<server>:8099/pair
+```
+
+It is there only when an operator token is set (`SUMMAREADER_OPERATOR_TOKEN`
+or `operator_token`), and that token is the password the page asks for. The
+page holds nothing until it is typed, keeps it in memory only, and loads
+nothing from anywhere but the server itself. The browser warns once about the
+certificate: compare the fingerprint the page shows with the one in the
+server log before going on.
+
+With no library yet the button is **Create first device**, which makes the
+library and its first device; with one it is **Add a device**, a token into
+that library. With more than one the page refuses and the console is the way
+in, so a second library can never be made from here. Either way it shows the
+code, the fingerprint, and the payload as text — a live device token, shown
+once. Like the console's, the code carries no key: a device that has never
+seen this library still joins by scanning a code in SummaReader.
+
+The address in the code is `--public-url` when set, trimmed of a trailing
+`/`, and otherwise the address the browser used to reach the page. Behind a
+load balancer or a port forward that may not be one the phone can reach, so
+set `--public-url` there.
+
+The page calls two routes, which a script can call as well:
+
+```sh
+curl -k https://127.0.0.1:8099/operator/pairing -H "Authorization: Bearer <operator-token>"
+# {"libraries":1,"fingerprint":"…"}
+curl -k -X POST https://127.0.0.1:8099/operator/pairing \
+  -H "Authorization: Bearer <operator-token>" -d '{"label":"Phone"}'
+# {"first":false,"server":"…","payload":"…","qr_svg":"<svg…","fingerprint":"…"}
+```
 
 ## Docker
 

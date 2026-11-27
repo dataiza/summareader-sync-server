@@ -399,6 +399,14 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.POST("/operator/remove", handleOperatorRemove)
 	e.Router.POST("/operator/enroll", handleOperatorEnroll)
 
+	// Pairing from a browser where there is no console; see pairpage.go.
+	// The page: no auth of its own, off when no operator token is set.
+	e.Router.GET("/pair", handlePairPage)
+	// Which button to show, and the fingerprint to compare with the log.
+	e.Router.GET("/operator/pairing", handlePairingState)
+	// The code itself: the first library, or a token into the one there is.
+	e.Router.POST("/operator/pairing", handlePairingCode)
+
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.
 	e.Router.GET("/instance", handleInstance)
