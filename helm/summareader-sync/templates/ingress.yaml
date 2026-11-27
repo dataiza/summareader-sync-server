@@ -4,7 +4,7 @@
 # Only the page and the one route it calls. Devices pin the server's own certificate (card 713), and a renewed public
 # certificate would change under every one of them every few months, so sync never goes through here: the QR this
 # page draws names publicURL, which is the LoadBalancer address and the server's own certificate.
-{{- $publicURL := required "publicURL is required with pairIngress: the QR must name the sync address, not this page's host" .Values.publicURL }}
+{{- $_ := required "publicURL is required with pairIngress: the QR must name the sync address, not this page's host" (trim .Values.publicURL) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

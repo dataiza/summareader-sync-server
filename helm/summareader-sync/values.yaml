@@ -18,6 +18,8 @@ service:
 # Only the page: devices keep syncing to publicURL and the server's own pinned certificate. The controller must
 # reach the pod over HTTPS without verifying it (the certificate is self-signed); for Traefik that is the
 # serversscheme and serverstransport annotations under service.annotations, and a ServersTransport.
+# The operator token is the only thing between this host and a new device token: keep the host LAN-only, or
+# restrict it (an IP allow-list or rate-limit middleware through pairIngress.annotations).
 pairIngress:
   enabled: false
   host: ""  # required when enabled, e.g. summareader-pair.example; publicURL is then required too

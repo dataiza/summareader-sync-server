@@ -78,9 +78,11 @@ func TestChartRenders(t *testing.T) {
 	ingress := append(base, "--set", "pairIngress.enabled=true",
 		"--set", "pairIngress.host=pair.example", "--set", "pairIngress.className=traefik",
 		"--set", "pairIngress.clusterIssuer=letsencrypt-production",
-		"--set", "service.annotations.a=b")
-	if out, err := helmTemplate(t, ingress...); err == nil {
-		t.Errorf("pairIngress without publicURL rendered; the QR would name the page's host:\n%s", out)
+		"--set", "service.annotations.a=b", "--set", "pairIngress.annotations.k=v")
+	for _, url := range []string{"", " "} {
+		if out, err := helmTemplate(t, append(ingress, "--set", "publicURL="+url)...); err == nil {
+			t.Errorf("pairIngress with publicURL %q rendered; the QR would name the page's host:\n%s", url, out)
+		}
 	}
 	out, err = helmTemplate(t, append(ingress, "--set", "publicURL=https://sync.example")...)
 	if err != nil {
@@ -90,11 +92,16 @@ func TestChartRenders(t *testing.T) {
 		"kind: Ingress", "ingressClassName: traefik", "host: pair.example",
 		"path: /pair", "path: /operator/pairing", "pathType: Exact",
 		"cert-manager.io/cluster-issuer: letsencrypt-production",
-		"secretName: summareader-sync-pair-tls", "a: b",
+		"secretName: summareader-sync-pair-tls", "a: b", "k: v",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pairIngress render lacks %q", want)
 		}
+	}
+	// Exactly the two paths, so no other /operator route and no sync route is reachable through it.
+	ingressDoc := out[strings.Index(out, "kind: Ingress"):]
+	if n := strings.Count(ingressDoc, "path:"); n != 2 {
+		t.Errorf("Ingress has %d paths, want 2:\n%s", n, ingressDoc)
 	}
 
 	out, err = helmTemplate(t, append(base, "--set", "service.labels.pool=static")...)

@@ -472,7 +472,7 @@ helm install sync helm/summareader-sync \
 | `pairIngress.enabled` | `false` | the `/pair` page behind an Ingress with a public certificate (below) |
 | `pairIngress.host`, `.className`, `.clusterIssuer`, `.annotations` | empty | its host name (required when enabled), IngressClass, cert-manager `ClusterIssuer`, extra annotations |
 | `service.hostname` | `summareader-sync` | DNS name for k8s-gateway (`coredns.io/hostname`) |
-| `publicURL` | empty | `SUMMAREADER_PUBLIC_URL`: the address a pairing QR carries; empty falls back to the request's `Host` |
+| `publicURL` | empty | `SUMMAREADER_PUBLIC_URL`: the address a pairing QR carries; empty falls back to the request's `Host`; required with `pairIngress` |
 | `name` | empty | `SUMMAREADER_NAME`: the name devices discover; empty leaves PocketBase's default, "Acme" |
 | `operatorToken.secretName` | required | Secret, key `operator-token`: the [`/pair` password](#pairing-from-a-browser) |
 | `metricsToken.secretName` | empty | Secret, key `metrics-token`; empty leaves `/metrics` off |
@@ -513,7 +513,7 @@ through it: devices pin the server's own certificate, and a public one renewed
 every few months would make every device stop and ask. That is why
 `publicURL` is required with it — the QR the page draws must name the sync
 address, not the page's. The controller reaches the pod over HTTPS without
-verifying it, the pod's certificate being self-signed; on Traefik:
+verifying it, the pod's certificate being self-signed. On Traefik, the values:
 
 ```yaml
 pairIngress:
@@ -525,8 +525,12 @@ service:
   annotations:
     traefik.ingress.kubernetes.io/service.serversscheme: https
     traefik.ingress.kubernetes.io/service.serverstransport: <namespace>-summareader-sync@kubernetescrd
----
-# beside it, in the same namespace
+```
+
+and beside the release, in the same namespace (Traefik's `kubernetescrd`
+provider, on by default, reads it):
+
+```yaml
 apiVersion: traefik.io/v1alpha1
 kind: ServersTransport
 metadata:
@@ -534,6 +538,17 @@ metadata:
 spec:
   insecureSkipVerify: true
 ```
+
+Other controllers take their own backend-HTTPS annotation under
+`pairIngress.annotations` — for ingress-nginx,
+`nginx.ingress.kubernetes.io/backend-protocol: HTTPS`.
+
+**Keep that host on the LAN.** The operator token is the only thing between it
+and a new device token for the library. A public certificate does not need a
+public host — cert-manager's DNS-01 issues for a name nobody outside can
+reach — and if it must be reachable from outside, put an IP allow-list or a
+rate limit in front through `pairIngress.annotations`. Use the page at `/pair`
+exactly; `/pair/` is not routed.
 
 The fingerprint the page shows is still the server's own, the one devices pin.
 
