@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -25,6 +26,7 @@ func callPairing(t *testing.T, app core.App, handler func(*core.RequestEvent) er
 	request.Host = host
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
+	request.TLS = &tls.ConnectionState{}
 	recorder := httptest.NewRecorder()
 	event := &core.RequestEvent{}
 	event.App = app
@@ -87,6 +89,25 @@ func TestPairPageIsServedWithAToken(t *testing.T) {
 	}
 	if recorder.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("the page may be cached")
+	}
+	want := "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+	if got := recorder.Header().Get("Content-Security-Policy"); got != want {
+		t.Fatalf("CSP = %q", got)
+	}
+}
+
+// The operator token must never cross plain HTTP (--insecure-http).
+func TestPairingRoutesRefusePlainHTTP(t *testing.T) {
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	for _, h := range []func(*core.RequestEvent) error{handlePairPage, handlePairingState, handlePairingCode} {
+		event := &core.RequestEvent{App: app}
+		event.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+		event.Request.Header.Set("Authorization", "Bearer op")
+		event.Response = httptest.NewRecorder()
+		if apiStatus(h(event)) != http.StatusNotFound {
+			t.Fatal("plain HTTP was served")
+		}
 	}
 }
 

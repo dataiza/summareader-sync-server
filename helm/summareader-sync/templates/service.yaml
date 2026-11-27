@@ -4,6 +4,9 @@ metadata:
   name: {{ .Chart.Name }}
   labels:
     {{- include "summareader-sync.labels" . | nindent 4 }}
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   annotations:
     {{- with .Values.service.loadBalancerIP }}
     lbipam.cilium.io/ips: {{ . }}

@@ -58,6 +58,22 @@ func TestChartRenders(t *testing.T) {
 		}
 	}
 
+	out, err = helmTemplate(t, append(base, "--set", "metricsToken.secretName=m",
+		"--set", "publicURL=https://x", "--set", "name=N")...)
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	for _, want := range []string{"SUMMAREADER_METRICS_TOKEN", "SUMMAREADER_PUBLIC_URL", "SUMMAREADER_NAME"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("optional-values render lacks %q", want)
+		}
+	}
+
+	out, err = helmTemplate(t, append(base, "--set", "service.labels.pool=static")...)
+	if err != nil || !strings.Contains(out, "pool: static") {
+		t.Errorf("service.labels not rendered, err=%v", err)
+	}
+
 	// Without host networking the announcement cannot leave the pod, so it is
 	// switched off and the host-network DNS policy must not be left behind.
 	out, err = helmTemplate(t, append(base, "--set", "hostNetwork=false")...)

@@ -54,6 +54,10 @@ spec:
             - name: SUMMAREADER_PUBLIC_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.name }}
+            - name: SUMMAREADER_NAME
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.hostNetwork }}
             {{- with .Values.service.loadBalancerIP }}
             - name: SUMMAREADER_ANNOUNCE_IP  # the stable address, not whichever node the pod landed on

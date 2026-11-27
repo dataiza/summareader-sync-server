@@ -10,9 +10,12 @@ hostNetwork: true
 service:
   port: 443  # what devices use, so the address has no port; 8099 is exposed as well, for the mDNS announcement
   loadBalancerIP: ""  # rendered as the Cilium LB-IPAM annotation; also what is announced over mDNS
+  labels: {}  # extra Service labels; Cilium LB-IPAM pools select Services by label, so loadBalancerIP stays pending without the pool's label
   hostname: summareader-sync  # rendered as the k8s-gateway DNS name
 
 publicURL: ""  # the address a pairing QR carries, e.g. https://summareader-sync.example; empty means the request's Host
+
+name: ""  # SUMMAREADER_NAME, what devices discover; empty leaves PocketBase's default, "Acme"
 
 operatorToken:
   secretName: ""  # required, an existing Secret with key operator-token; the chart never creates one. It is the /pair password.

@@ -52,7 +52,7 @@ type Config struct {
 	// IP does not. Empty announces the machine's own, as before.
 	AnnounceIP string `json:"announce_ip,omitempty"`
 	// The address a pairing code carries, as a device should reach this
-	// server: scheme, host and port, no path. Empty falls back to the host the
+	// server: scheme, host and port (a path is kept). Empty falls back to the host the
 	// request arrived on, which is right only when nothing rewrites it.
 	PublicURL string `json:"public_url,omitempty"`
 	// Also answer plain HTTP beside TLS, for devices whose app predates card

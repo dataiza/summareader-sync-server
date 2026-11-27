@@ -30,15 +30,19 @@ func noStore(e *core.RequestEvent) {
 	e.Response.Header().Set("Cache-Control", "no-store")
 }
 
+// Under --insecure-http the operator token would cross the LAN in clear, so
+// these routes answer as if absent unless the request came over TLS.
+func plainHTTP(e *core.RequestEvent) bool { return e.Request.TLS == nil }
+
 func handlePairPage(e *core.RequestEvent) error {
-	if operatorToken() == "" {
+	if operatorToken() == "" || plainHTTP(e) {
 		return e.NotFoundError("", nil)
 	}
 	noStore(e)
 	// Inline style and script only; fetches to this server only. The QR is an
 	// inline SVG for the same reason.
 	e.Response.Header().Set("Content-Security-Policy",
-		"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
+		"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	return e.HTML(http.StatusOK, pairPage)
 }
 
@@ -46,6 +50,9 @@ func handlePairPage(e *core.RequestEvent) error {
 // fingerprint to compare with the server log before trusting anything.
 func handlePairingState(e *core.RequestEvent) error {
 	noStore(e)
+	if plainHTTP(e) {
+		return e.NotFoundError("", nil)
+	}
 	if ok, err := operatorOK(e); !ok {
 		return err
 	}
@@ -78,6 +85,9 @@ var errSeveralLibraries = errors.New("several libraries")
 // second library can never be made from here.
 func handlePairingCode(e *core.RequestEvent) error {
 	noStore(e)
+	if plainHTTP(e) {
+		return e.NotFoundError("", nil)
+	}
 	if ok, err := operatorOK(e); !ok {
 		return err
 	}

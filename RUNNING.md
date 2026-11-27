@@ -318,7 +318,9 @@ https://<server>:8099/pair
 ```
 
 It is there only when an operator token is set (`SUMMAREADER_OPERATOR_TOKEN`
-or `operator_token`), and that token is the password the page asks for. The
+or `operator_token`), and that token is the password the page asks for. It is the only thing guarding
+`/pair` and `/operator/*` on the LAN, so make it a long random token
+(`openssl rand -hex 24`), not a memorable password. The
 page holds nothing until it is typed, keeps it in memory only, and loads
 nothing from anywhere but the server itself. The browser warns once about the
 certificate: compare the fingerprint the page shows with the one in the
@@ -461,8 +463,10 @@ helm install sync helm/summareader-sync \
 | `hostNetwork` | `true` | share the node's network so the mDNS announcement leaves the pod; see below |
 | `service.loadBalancerIP` | empty | the Cilium LB-IPAM address (`lbipam.cilium.io/ips`), and the address announced |
 | `service.port` | `443` | the port devices use, so the address has none; 8099 is exposed too, for the mDNS announcement |
+| `service.labels` | `{}` | extra Service labels; a Cilium LB-IPAM pool selects Services by label, so `loadBalancerIP` stays pending unless the Service carries the pool's label |
 | `service.hostname` | `summareader-sync` | DNS name for k8s-gateway (`coredns.io/hostname`) |
 | `publicURL` | empty | `SUMMAREADER_PUBLIC_URL`: the address a pairing QR carries; empty falls back to the request's `Host` |
+| `name` | empty | `SUMMAREADER_NAME`: the name devices discover; empty leaves PocketBase's default, "Acme" |
 | `operatorToken.secretName` | required | Secret, key `operator-token`: the [`/pair` password](#pairing-from-a-browser) |
 | `metricsToken.secretName` | empty | Secret, key `metrics-token`; empty leaves `/metrics` off |
 | `persistence.size`, `.storageClass` | `1Gi`, cluster default | the database volume, kept on uninstall |
@@ -477,6 +481,8 @@ works. Kubernetes' `baseline` pod-security level forbids `hostNetwork`, so the
 namespace must be labelled `pod-security.kubernetes.io/enforce: privileged`.
 With `hostNetwork: false` the announcement is switched off
 (`SUMMAREADER_NO_ANNOUNCE=1`); devices then need the address typed or scanned.
+
+With `hostNetwork` the server is also reachable on its node's own `IP:8099`, not only the LB IP; firewall accordingly.
 
 **Across networks.** The announcement reaches the server's own network only.
 For devices on another VLAN, the router must repeat mDNS between the two; on an
