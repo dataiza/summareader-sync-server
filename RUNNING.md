@@ -326,6 +326,10 @@ nothing from anywhere but the server itself. The browser warns once about the
 certificate: compare the fingerprint the page shows with the one in the
 server log before going on.
 
+The page is off while `--insecure-http` is on. It answers only over TLS, so the
+token is never typed into a page that might have arrived in the clear, and
+under `--insecure-http` the server cannot tell the two apart.
+
 With no library yet the button is **Create first device**, which makes the
 library and its first device; with one it is **Add a device**, a token into
 that library. With more than one the page refuses and the console is the way
