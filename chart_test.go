@@ -51,7 +51,7 @@ func TestChartRenders(t *testing.T) {
 	for _, want := range []string{
 		"hostNetwork: true", "dnsPolicy: ClusterFirstWithHostNet",
 		"lbipam.cilium.io/ips: 10.39.20.12", "coredns.io/hostname: summareader-sync",
-		"SUMMAREADER_ANNOUNCE_IP", "type: Recreate",
+		"SUMMAREADER_ANNOUNCE_IP", "type: Recreate", "port: 443", "port: 8099",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("default render lacks %q", want)

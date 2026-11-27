@@ -443,7 +443,7 @@ A Helm chart is in `helm/summareader-sync/`; its `version` and `appVersion` are
 the server's version, and the image tag is the same number. Build and push the
 image with `scripts/push-image.sh` (`REGISTRY` overrides the default
 `10.34.1.1:30095`). TLS is the server's own, so there is no ingress or proxy in
-front: the Service is a `LoadBalancer` on port 8099 and the probes use HTTPS.
+front: the Service is a `LoadBalancer` on port 443 (`service.port`) and 8099, and the probes use HTTPS.
 
 The chart never creates a Secret. Make one holding the pairing password
 (`openssl rand -hex 24`) under the key `operator-token`, and pass its name:
@@ -452,7 +452,7 @@ The chart never creates a Secret. Make one holding the pairing password
 helm install sync helm/summareader-sync \
   --set operatorToken.secretName=summareader-sync \
   --set service.loadBalancerIP=10.39.20.12 \
-  --set publicURL=https://summareader-sync.example:8099
+  --set publicURL=https://summareader-sync.example
 ```
 
 | value | default | meaning |
@@ -460,6 +460,7 @@ helm install sync helm/summareader-sync \
 | `image.repository`, `image.tag` | `10.34.1.1:30095/summareader-sync`, appVersion | the image |
 | `hostNetwork` | `true` | share the node's network so the mDNS announcement leaves the pod; see below |
 | `service.loadBalancerIP` | empty | the Cilium LB-IPAM address (`lbipam.cilium.io/ips`), and the address announced |
+| `service.port` | `443` | the port devices use, so the address has none; 8099 is exposed too, for the mDNS announcement |
 | `service.hostname` | `summareader-sync` | DNS name for k8s-gateway (`coredns.io/hostname`) |
 | `publicURL` | empty | `SUMMAREADER_PUBLIC_URL`: the address a pairing QR carries; empty falls back to the request's `Host` |
 | `operatorToken.secretName` | required | Secret, key `operator-token`: the [`/pair` password](#pairing-from-a-browser) |
@@ -487,11 +488,11 @@ set service mdns repeater interface <cluster VLAN interface>
 commit ; save
 ```
 
-and the firewall must allow TCP 8099 from the device networks to the
+and the firewall must allow TCP 443 and 8099 from the device networks to the
 LoadBalancer IP. Other routers are in the
 [README](README.md#server-and-devices-on-different-networks).
 
-**First device.** Open `https://<address>:8099/pair`, type the operator token
+**First device.** Open `https://<address>/pair`, type the operator token
 and press *Create first device*; scan the QR from the app. See
 [Pairing from a browser](#pairing-from-a-browser).
 

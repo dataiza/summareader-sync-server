@@ -261,7 +261,7 @@ Turn on the repeater for both networks:
 Then check the rest:
 
 - The router accepts its own mDNS (UDP 5353) on each interface it repeats on
-  (some firewalls block traffic to the router by default), and TCP 8099 is
+  (some firewalls block traffic to the router by default), and TCP 443 and 8099 are
   allowed from the devices to the server.
 - In Kubernetes the pod needs `hostNetwork: true` and `announce_ip` set to the
   LoadBalancer IP; the chart does both.

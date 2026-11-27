@@ -15,5 +15,9 @@ spec:
     {{- include "summareader-sync.selector" . | nindent 4 }}
   ports:
     - name: https
+      port: {{ .Values.service.port }}
+      targetPort: https
+    # The mDNS announcement advertises the server's own port, so 8099 stays reachable on the LB IP too.
+    - name: https-alt
       port: 8099
       targetPort: https
