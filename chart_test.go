@@ -73,6 +73,12 @@ func TestChartRenders(t *testing.T) {
 		}
 	}
 
+	// No LB IP: omit the variable, so the pod announces the node's own address.
+	out, err = helmTemplate(t, "--set", "operatorToken.secretName=s")
+	if err != nil || strings.Contains(out, "SUMMAREADER_ANNOUNCE_IP") {
+		t.Errorf("hostNetwork with no loadBalancerIP should omit SUMMAREADER_ANNOUNCE_IP, err=%v", err)
+	}
+
 	out, err = helmTemplate(t)
 	if err == nil || !strings.Contains(out, "operatorToken.secretName is required") {
 		t.Errorf("missing secret name should fail with the required message, got err=%v\n%s", err, out)

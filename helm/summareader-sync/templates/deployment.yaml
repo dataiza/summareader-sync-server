@@ -55,8 +55,10 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- if .Values.hostNetwork }}
+            {{- with .Values.service.loadBalancerIP }}
             - name: SUMMAREADER_ANNOUNCE_IP  # the stable address, not whichever node the pod landed on
-              value: {{ .Values.service.loadBalancerIP | quote }}
+              value: {{ . | quote }}
+            {{- end }}
             {{- else }}
             - name: SUMMAREADER_NO_ANNOUNCE  # a pod network does not carry multicast to the LAN
               value: "1"

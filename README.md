@@ -260,8 +260,9 @@ Turn on the repeater for both networks:
 
 Then check the rest:
 
-- The firewall allows UDP 5353 between the networks, and TCP 8099 from the
-  devices to the server.
+- The router accepts its own mDNS (UDP 5353) on each interface it repeats on
+  (some firewalls block traffic to the router by default), and TCP 8099 is
+  allowed from the devices to the server.
 - In Kubernetes the pod needs `hostNetwork: true` and `announce_ip` set to the
   LoadBalancer IP; the chart does both.
 - In Docker the container needs `network_mode: host`, or the announcement does

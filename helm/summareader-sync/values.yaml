@@ -4,7 +4,7 @@ image:
 
 # The server announces itself over mDNS, which only leaves a pod that shares the node's network.
 # true: announce the LoadBalancer IP (service.loadBalancerIP), and the namespace must allow hostNetwork
-# (pod-security "privileged"). false: no announcement; devices use the address typed or scanned.
+# (pod-security "privileged"); with no loadBalancerIP the pod announces the node's own address. false: no announcement; devices use the address typed or scanned.
 hostNetwork: true
 
 service:

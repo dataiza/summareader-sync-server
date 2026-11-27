@@ -471,7 +471,7 @@ helm install sync helm/summareader-sync \
 [Finding it on a local network](#finding-it-on-a-local-network)). With
 `hostNetwork: true` the pod shares its node's network, announces
 `service.loadBalancerIP` (`SUMMAREADER_ANNOUNCE_IP`) rather than the node's own
-address, and gets `dnsPolicy: ClusterFirstWithHostNet` so cluster DNS still
+address (with no `service.loadBalancerIP` set, the node's own address), and gets `dnsPolicy: ClusterFirstWithHostNet` so cluster DNS still
 works. Kubernetes' `baseline` pod-security level forbids `hostNetwork`, so the
 namespace must be labelled `pod-security.kubernetes.io/enforce: privileged`.
 With `hostNetwork: false` the announcement is switched off
