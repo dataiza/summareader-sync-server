@@ -12,6 +12,9 @@ metadata:
     lbipam.cilium.io/ips: {{ . }}
     {{- end }}
     coredns.io/hostname: {{ .Values.service.hostname }}
+    {{- with .Values.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   type: LoadBalancer
   selector:

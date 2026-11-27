@@ -448,7 +448,7 @@ nothing depends on this.
 A Helm chart is in `helm/summareader-sync/`; its `version` and `appVersion` are
 the server's version, and the image tag is the same number. Build and push the
 image with `scripts/push-image.sh` (`REGISTRY` overrides the default
-`10.34.1.1:30095`). TLS is the server's own, so there is no ingress or proxy in
+`10.34.1.1:30095`). TLS is the server's own, so sync has no ingress or proxy in
 front: the Service is a `LoadBalancer` on port 443 (`service.port`) and 8099, and the probes use HTTPS.
 
 The chart never creates a Secret. Make one holding the pairing password
@@ -468,6 +468,9 @@ helm install sync helm/summareader-sync \
 | `service.loadBalancerIP` | empty | the Cilium LB-IPAM address (`lbipam.cilium.io/ips`), and the address announced |
 | `service.port` | `443` | the port devices use, so the address has none; 8099 is exposed too, for the mDNS announcement |
 | `service.labels` | `{}` | extra Service labels; a Cilium LB-IPAM pool selects Services by label, so `loadBalancerIP` stays pending unless the Service carries the pool's label |
+| `service.annotations` | `{}` | extra Service annotations, e.g. how an ingress controller reaches the pod over HTTPS (below) |
+| `pairIngress.enabled` | `false` | the `/pair` page behind an Ingress with a public certificate (below) |
+| `pairIngress.host`, `.className`, `.clusterIssuer`, `.annotations` | empty | its host name (required when enabled), IngressClass, cert-manager `ClusterIssuer`, extra annotations |
 | `service.hostname` | `summareader-sync` | DNS name for k8s-gateway (`coredns.io/hostname`) |
 | `publicURL` | empty | `SUMMAREADER_PUBLIC_URL`: the address a pairing QR carries; empty falls back to the request's `Host` |
 | `name` | empty | `SUMMAREADER_NAME`: the name devices discover; empty leaves PocketBase's default, "Acme" |
@@ -501,6 +504,38 @@ commit ; save
 and the firewall must allow TCP 443 and 8099 from the device networks to the
 LoadBalancer IP. Other routers are in the
 [README](README.md#server-and-devices-on-different-networks).
+
+**The pairing page with a public certificate.** A browser warns once about the
+server's own certificate. With `pairIngress.enabled`, the chart adds an Ingress
+carrying only `/pair` and `/operator/pairing` on a second name, with a
+certificate from cert-manager, so the page shows a padlock. Sync never goes
+through it: devices pin the server's own certificate, and a public one renewed
+every few months would make every device stop and ask. That is why
+`publicURL` is required with it — the QR the page draws must name the sync
+address, not the page's. The controller reaches the pod over HTTPS without
+verifying it, the pod's certificate being self-signed; on Traefik:
+
+```yaml
+pairIngress:
+  enabled: true
+  host: summareader-pair.example
+  className: traefik
+  clusterIssuer: letsencrypt-production
+service:
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: https
+    traefik.ingress.kubernetes.io/service.serverstransport: <namespace>-summareader-sync@kubernetescrd
+---
+# beside it, in the same namespace
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: summareader-sync
+spec:
+  insecureSkipVerify: true
+```
+
+The fingerprint the page shows is still the server's own, the one devices pin.
 
 **First device.** Open `https://<address>/pair`, type the operator token
 and press *Create first device*; scan the QR from the app. See

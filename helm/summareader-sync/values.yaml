@@ -12,6 +12,18 @@ service:
   loadBalancerIP: ""  # rendered as the Cilium LB-IPAM annotation; also what is announced over mDNS
   labels: {}  # extra Service labels; Cilium LB-IPAM pools select Services by label, so loadBalancerIP stays pending without the pool's label
   hostname: summareader-sync  # rendered as the k8s-gateway DNS name
+  annotations: {}  # extra Service annotations, e.g. how an ingress controller reaches the pod over HTTPS (pairIngress)
+
+# The /pair page behind an Ingress with a public certificate (cert-manager), for a browser without a warning.
+# Only the page: devices keep syncing to publicURL and the server's own pinned certificate. The controller must
+# reach the pod over HTTPS without verifying it (the certificate is self-signed); for Traefik that is the
+# serversscheme and serverstransport annotations under service.annotations, and a ServersTransport.
+pairIngress:
+  enabled: false
+  host: ""  # required when enabled, e.g. summareader-pair.example; publicURL is then required too
+  className: ""  # empty means the cluster's default IngressClass
+  clusterIssuer: ""  # rendered as cert-manager.io/cluster-issuer
+  annotations: {}
 
 publicURL: ""  # the address a pairing QR carries, e.g. https://summareader-sync.example; empty means the request's Host
 

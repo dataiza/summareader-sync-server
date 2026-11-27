@@ -69,6 +69,34 @@ func TestChartRenders(t *testing.T) {
 		}
 	}
 
+	// The browser-only Ingress: off by default, and when on it carries only the
+	// pairing page and the route that page calls — never the sync routes, whose
+	// devices pin the server's own certificate and must keep reaching it directly.
+	if strings.Contains(out, "kind: Ingress") {
+		t.Error("default render has an Ingress")
+	}
+	ingress := append(base, "--set", "pairIngress.enabled=true",
+		"--set", "pairIngress.host=pair.example", "--set", "pairIngress.className=traefik",
+		"--set", "pairIngress.clusterIssuer=letsencrypt-production",
+		"--set", "service.annotations.a=b")
+	if out, err := helmTemplate(t, ingress...); err == nil {
+		t.Errorf("pairIngress without publicURL rendered; the QR would name the page's host:\n%s", out)
+	}
+	out, err = helmTemplate(t, append(ingress, "--set", "publicURL=https://sync.example")...)
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"kind: Ingress", "ingressClassName: traefik", "host: pair.example",
+		"path: /pair", "path: /operator/pairing", "pathType: Exact",
+		"cert-manager.io/cluster-issuer: letsencrypt-production",
+		"secretName: summareader-sync-pair-tls", "a: b",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pairIngress render lacks %q", want)
+		}
+	}
+
 	out, err = helmTemplate(t, append(base, "--set", "service.labels.pool=static")...)
 	if err != nil || !strings.Contains(out, "pool: static") {
 		t.Errorf("service.labels not rendered, err=%v", err)
