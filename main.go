@@ -439,6 +439,9 @@ func registerRoutes(e *core.ServeEvent) {
 	// Pairing from a browser where there is no console; see pairpage.go.
 	// The page: no auth of its own, off when no operator token is set.
 	e.Router.GET("/pair", handlePairPage)
+	// The bare address opens the same page. "{$}" makes it the root alone:
+	// a plain "/" would be the fallback for every path nothing else claims.
+	e.Router.GET("/{$}", handlePairPage)
 	// Which button to show, and the fingerprint to compare with the log.
 	e.Router.GET("/operator/pairing", handlePairingState)
 	// The code itself: the first library, or a token into the one there is.

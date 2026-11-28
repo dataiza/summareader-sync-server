@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -179,5 +180,29 @@ func TestTheLockdownIsIdempotent(t *testing.T) {
 	}
 	if users.CreateRule != nil || users.ListRule != nil || users.ViewRule != nil {
 		t.Fatal("the users collection is still open")
+	}
+}
+
+// The bare address opens the pairing page, and only the bare address: an
+// unknown path stays a 404 rather than drawing the page.
+func TestTheRootIsThePairingPage(t *testing.T) {
+	app, _ := newTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	mux := builtinsMux(t, app)
+	get := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = fromLAN
+		request.TLS = &tls.ConnectionState{}
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, request)
+		return recorder
+	}
+	for _, path := range []string{"/", "/pair"} {
+		if r := get(path); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), "<html") {
+			t.Fatalf("%s answered %d without the page", path, r.Code)
+		}
+	}
+	if r := get("/no-such-page"); r.Code != http.StatusNotFound {
+		t.Fatalf("an unknown path answered %d, want 404", r.Code)
 	}
 }

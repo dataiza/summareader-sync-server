@@ -311,9 +311,11 @@ those things by hand would say, in a form a camera can read.
 ## Pairing from a browser
 
 A server with no console beside it — in a container, in Kubernetes, on a box
-in a cupboard — draws the same pairing code at `/pair`:
+in a cupboard — draws the same pairing code at `/pair`, and at the bare
+address too:
 
 ```
+https://<server>:8099/
 https://<server>:8099/pair
 ```
 

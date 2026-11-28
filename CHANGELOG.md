@@ -3,6 +3,10 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## 2.1.0
+
+- **The pairing page at the bare address.** `https://<server>/` opens the same page as `/pair`, which keeps working. Only the root itself: an unknown path is still a 404.
+
 ## 2.0.0
 
 - **A public certificate.** `tls_cert` and `tls_key` (`--tls-cert`/`--tls-key`, `SUMMAREADER_TLS_CERT`/`SUMMAREADER_TLS_KEY`) make the server serve a certificate from a public authority instead of its own. It refuses to start with one and no `publicURL`, re-reads the files when they change so a renewal needs no restart, and keeps the loaded certificate if a re-read fails. With it, pairing codes, `first-device` and the `/pair` page carry no fingerprint, and `devices` pins the configured file's. SummaReader 0.151.0 or later drops a stored pin when the address it was paired with answers as a sync server with a certificate the system trusts for that name; a device stored by a private IP address keeps asking and needs a new pairing code.
