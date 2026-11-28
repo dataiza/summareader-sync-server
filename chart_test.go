@@ -69,39 +69,55 @@ func TestChartRenders(t *testing.T) {
 		}
 	}
 
-	// The browser-only Ingress: off by default, and when on it carries only the
-	// pairing page and the route that page calls — never the sync routes, whose
-	// devices pin the server's own certificate and must keep reaching it directly.
-	if strings.Contains(out, "kind: Ingress") {
-		t.Error("default render has an Ingress")
-	}
-	ingress := append(base, "--set", "pairIngress.enabled=true",
-		"--set", "pairIngress.host=pair.example", "--set", "pairIngress.className=traefik",
-		"--set", "pairIngress.clusterIssuer=letsencrypt-production",
-		"--set", "service.annotations.a=b", "--set", "pairIngress.annotations.k=v")
-	for _, url := range []string{"", " "} {
-		if out, err := helmTemplate(t, append(ingress, "--set", "publicURL="+url)...); err == nil {
-			t.Errorf("pairIngress with publicURL %q rendered; the QR would name the page's host:\n%s", url, out)
+	// A public certificate is off by default: no Certificate, no volume, no variables.
+	for _, bad := range []string{"kind: Certificate", "SUMMAREADER_TLS_CERT", "/tls", "kind: Ingress"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("default render has %q", bad)
 		}
 	}
-	out, err = helmTemplate(t, append(ingress, "--set", "publicURL=https://sync.example")...)
+
+	// cert-manager: the Certificate is issued for publicURL's host, and the pod reads it from the Secret.
+	cm := append(base, "--set", "tls.certManager.enabled=true", "--set", "tls.certManager.clusterIssuer=le")
+	out, err = helmTemplate(t, append(cm, "--set", "publicURL=https://sync.example:8443")...)
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"kind: Ingress", "ingressClassName: traefik", "host: pair.example",
-		"path: /pair", "path: /operator/pairing", "pathType: Exact",
-		"cert-manager.io/cluster-issuer: letsencrypt-production",
-		"secretName: summareader-sync-pair-tls", "a: b", "k: v",
+		"kind: Certificate", "- sync.example\n", "kind: ClusterIssuer", "name: le",
+		"secretName: summareader-sync-tls", "defaultMode: 0440", "mountPath: /tls", "readOnly: true",
+		"fsGroup: 10001", "value: /tls/tls.crt", "value: /tls/tls.key",
+		"SUMMAREADER_TLS_CERT", "SUMMAREADER_TLS_KEY",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("pairIngress render lacks %q", want)
+			t.Errorf("certManager render lacks %q\n%s", want, out)
 		}
 	}
-	// Exactly the two paths, so no other /operator route and no sync route is reachable through it.
-	ingressDoc := out[strings.Index(out, "kind: Ingress"):]
-	if n := strings.Count(ingressDoc, "path:"); n != 2 {
-		t.Errorf("Ingress has %d paths, want 2:\n%s", n, ingressDoc)
+	if strings.Contains(out[strings.Index(out, "dnsNames"):], "8443") {
+		t.Error("dnsNames keeps the port")
+	}
+	if strings.Contains(out, "kind: Ingress") {
+		t.Error("certManager render has an Ingress")
+	}
+	out, err = helmTemplate(t, append(cm, "--set", "publicURL=https://sync.example", "--set", "tls.certManager.secretName=mine")...)
+	if err != nil || !strings.Contains(out, "secretName: mine") {
+		t.Errorf("tls.certManager.secretName not used, err=%v", err)
+	}
+	for _, url := range []string{"", " "} {
+		out, err := helmTemplate(t, append(cm, "--set", "publicURL="+url)...)
+		if err == nil || !strings.Contains(out, "publicURL is required with tls.certManager: the certificate is issued for its host") {
+			t.Errorf("certManager with publicURL %q should fail with the required message, err=%v\n%s", url, err, out)
+		}
+	}
+	if out, err := helmTemplate(t, append(cm, "--set", "publicURL=sync.example")...); err == nil || !strings.Contains(out, "has no host") {
+		t.Errorf("certManager with a schemeless publicURL should fail with a no-host message, err=%v\n%s", err, out)
+	}
+	if out, err := helmTemplate(t, append(base, "--set", "tls.certManager.enabled=true", "--set", "publicURL=https://sync.example")...); err == nil {
+		t.Errorf("certManager without clusterIssuer rendered:\n%s", out)
+	}
+	// The removed pairIngress values are ignored, not an error, and render no Ingress.
+	out, err = helmTemplate(t, append(base, "--set", "pairIngress.enabled=true", "--set", "pairIngress.host=p.example")...)
+	if err != nil || strings.Contains(out, "kind: Ingress") {
+		t.Errorf("pairIngress should be ignored, err=%v", err)
 	}
 
 	out, err = helmTemplate(t, append(base, "--set", "service.labels.pool=static")...)

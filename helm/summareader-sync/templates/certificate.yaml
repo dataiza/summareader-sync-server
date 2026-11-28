@@ -1,0 +1,19 @@
+{{- if .Values.tls.certManager.enabled }}
+{{- $url := trim (.Values.publicURL | toString) }}
+{{- if not $url }}{{ fail "publicURL is required with tls.certManager: the certificate is issued for its host" }}{{ end }}
+{{- $host := regexReplaceAll ":[0-9]+$" (urlParse $url).host "" }}
+{{- if not $host }}{{ fail (printf "publicURL %q has no host: write it with its scheme, e.g. https://summareader-sync.example" $url) }}{{ end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "summareader-sync.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.certManager.secretName | default (printf "%s-tls" .Chart.Name) }}
+  dnsNames:
+    - {{ $host }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ required "tls.certManager.clusterIssuer is required" .Values.tls.certManager.clusterIssuer }}
+{{- end }}

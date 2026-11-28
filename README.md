@@ -238,8 +238,10 @@ docker compose logs -f
 
 ### Kubernetes
 
-The Helm chart is in `helm/summareader-sync/`. Values, the pod-security
-requirement and first pairing are in
+The Helm chart is in `helm/summareader-sync/`. It serves everything, devices
+and the `/pair` page, at the one address, and can get a public certificate for
+it from cert-manager. Values, the pod-security requirement and first pairing
+are in
 [RUNNING.md](RUNNING.md#kubernetes).
 
 ### Server and devices on different networks

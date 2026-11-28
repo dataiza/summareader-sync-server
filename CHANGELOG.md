@@ -3,6 +3,13 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
+## Unreleased
+
+- **A public certificate.** `tls_cert` and `tls_key` (`--tls-cert`/`--tls-key`, `SUMMAREADER_TLS_CERT`/`SUMMAREADER_TLS_KEY`) make the server serve a certificate from a public authority instead of its own. It refuses to start with one and no `publicURL`, re-reads the files when they change so a renewal needs no restart, and keeps the loaded certificate if a re-read fails. With it, pairing codes, `first-device` and the `/pair` page carry no fingerprint, and `devices` pins the configured file's. SummaReader 0.151.0 or later drops a stored pin when the address it was paired with answers as a sync server with a certificate the system trusts for that name; a device stored by a private IP address keeps asking and needs a new pairing code.
+- **The announcement names the public address**: mDNS gains `url=<publicURL>` when `publicURL` is set.
+- **`/pair` lists and removes devices**, through the new `GET /operator/devices` (operator token).
+- **Breaking: the Helm chart's `pairIngress` is removed**, with its Ingress and the Traefik `ServersTransport` it needed. The server's own certificate now makes `/pair` trusted by a browser at the one address. Use `tls.certManager.enabled`, `tls.certManager.clusterIssuer` and `publicURL` instead; `pairIngress` values left in place are ignored.
+
 ## 1.7.0
 
 - **The Helm chart can put the pairing page behind an Ingress with a public certificate.** `pairIngress.enabled` adds an Ingress carrying only `/pair` and `/operator/pairing`, with a certificate from cert-manager (`pairIngress.clusterIssuer`), so a browser shows no warning. Sync never goes through it: devices keep the server's own pinned certificate, and the QR the page draws names `publicURL`, which the chart requires with it. `service.annotations` tells the ingress controller to reach the pod over HTTPS; RUNNING.md has the Traefik example. Keep that host on the LAN. Docker and the binary are unchanged.

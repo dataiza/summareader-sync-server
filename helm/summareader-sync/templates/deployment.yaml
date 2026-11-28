@@ -54,6 +54,12 @@ spec:
             - name: SUMMAREADER_PUBLIC_URL
               value: {{ . | quote }}
             {{- end }}
+            {{- if .Values.tls.certManager.enabled }}
+            - name: SUMMAREADER_TLS_CERT  # the server reloads these when cert-manager renews them
+              value: /tls/tls.crt
+            - name: SUMMAREADER_TLS_KEY
+              value: /tls/tls.key
+            {{- end }}
             {{- with .Values.name }}
             - name: SUMMAREADER_NAME
               value: {{ . | quote }}
@@ -70,7 +76,7 @@ spec:
           ports:
             - name: https
               containerPort: 8099
-          # The server terminates TLS itself (self-signed, pinned by the app), so the probes speak HTTPS.
+          # The server terminates TLS itself (self-signed and pinned by the app, or the public certificate), so the probes speak HTTPS.
           readinessProbe:
             httpGet:
               path: /instance
@@ -92,6 +98,11 @@ spec:
               mountPath: /data
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.tls.certManager.enabled }}
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
@@ -100,3 +111,9 @@ spec:
             claimName: {{ .Chart.Name }}
         - name: tmp
           emptyDir: {}
+        {{- if .Values.tls.certManager.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.certManager.secretName | default (printf "%s-tls" .Chart.Name) }}
+            defaultMode: 0440  # group-readable; fsGroup 10001 gives the non-root server that group
+        {{- end }}
