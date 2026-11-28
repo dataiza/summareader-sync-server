@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -137,10 +138,9 @@ func main() {
 		if err != nil {
 			return err
 		}
-		publicCertificate = tlsCert != ""
+		publicCertificate = configuredCertificate()
 		if publicCertificate && publicURL == "" {
-			return errors.New("tls_cert needs public_url: a pairing code then " +
-				"names that address, and the certificate has to cover it")
+			return errPublicCertificateNeedsURL
 		}
 		addr := e.Server.Addr
 		if addr == "" {
@@ -957,6 +957,11 @@ func registerCommands(app *pocketbase.PocketBase) {
 				deviceLabel = args[1]
 			}
 
+			// Before the library is made, so a refusal leaves nothing behind.
+			if configuredCertificate() && publicURL == "" {
+				log.Fatal(errPublicCertificateNeedsURL)
+			}
+
 			if err := ensureSchema(app); err != nil {
 				log.Fatal(err)
 			}
@@ -969,15 +974,20 @@ func registerCommands(app *pocketbase.PocketBase) {
 			// Made here if the server has never started, so the first device
 			// is told the fingerprint it will meet rather than finding out on
 			// first contact. The same file serve reads. Card 713.
-			_, fp, err := loadOrCreateCertificate(app.DataDir())
-			if err != nil {
-				log.Fatal(err)
+			// With a configured certificate there is none to make: a self-signed
+			// pair beside it would only be a second identity nobody asked for.
+			fp := ""
+			if !configuredCertificate() {
+				var err error
+				if _, fp, err = loadOrCreateCertificate(app.DataDir()); err != nil {
+					log.Fatal(err)
+				}
 			}
 
 			if asJSON {
 				encoded, _ := json.Marshal(struct {
 					*Device
-					Fingerprint string `json:"fingerprint"`
+					Fingerprint string `json:"fingerprint,omitempty"`
 				}{device, fp})
 				// Straight to stdout, not through cobra: PocketBase points the
 				// command's writer at stderr, so `$(... --json)` in a script
@@ -995,13 +1005,20 @@ func registerCommands(app *pocketbase.PocketBase) {
 			cmd.Println("Account: " + device.AccountID)
 			cmd.Println("Device:  " + device.DeviceID + "  (" + device.Label + ")")
 			cmd.Println("Token:   " + device.Token)
-			cmd.Println("Certificate fingerprint (SHA-256):")
-			cmd.Println("  " + displayFingerprint(fp))
+			if fp == "" {
+				cmd.Println("Certificate: issued by an authority for " + publicHost())
+			} else {
+				cmd.Println("Certificate fingerprint (SHA-256):")
+				cmd.Println("  " + displayFingerprint(fp))
+			}
 			cmd.Println("──────────────────────────────────────────────")
 			cmd.Println()
 			cmd.Println("Paste the token into SummaReader on this device, with")
-			cmd.Println("the server's address starting https://. When the app")
-			cmd.Println("shows a fingerprint, check it against the one above.")
+			cmd.Println("the server's address starting https://.")
+			if fp != "" {
+				cmd.Println("When the app shows a fingerprint, check it against")
+				cmd.Println("the one above.")
+			}
 			// True since card 714: the devices collection holds the token's
 			// hash, so not even this server can show it again.
 			cmd.Println("It is shown once and is not recoverable — the server")
@@ -1412,3 +1429,16 @@ func handleRevoke(e *core.RequestEvent) error {
 	}
 	return e.JSON(http.StatusOK, map[string]string{"revoked": body.DeviceID})
 }
+
+// The host of public_url, for the line that says whom the certificate was
+// issued to. Without a public_url, which serve refuses with a configured
+// certificate, there is nothing to name.
+func publicHost() string {
+	if u, err := url.Parse(publicURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return publicURL
+}
+
+var errPublicCertificateNeedsURL = errors.New("tls_cert needs public_url: a " +
+	"pairing code then names that address, and the certificate has to cover it")

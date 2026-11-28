@@ -60,14 +60,26 @@ func handlePairingState(e *core.RequestEvent) error {
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": "unavailable"})
 	}
-	_, fingerprint, err := loadOrCreateCertificate(e.App.DataDir())
+	state := map[string]any{"libraries": libraries}
+	fingerprint, err := pairingFingerprint(e)
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": "unavailable"})
 	}
-	return e.JSON(http.StatusOK, map[string]any{
-		"libraries":   libraries,
-		"fingerprint": fingerprint,
-	})
+	if fingerprint != "" {
+		state["fingerprint"] = fingerprint
+	}
+	return e.JSON(http.StatusOK, state)
+}
+
+// The self-signed certificate's fingerprint, or none where an authority
+// signed the certificate: the device checks that one as a browser does, and a
+// self-signed pair must not be made beside it just to have something to show.
+func pairingFingerprint(e *core.RequestEvent) (string, error) {
+	if publicCertificate {
+		return "", nil
+	}
+	_, fingerprint, err := loadOrCreateCertificate(e.App.DataDir())
+	return fingerprint, err
 }
 
 type pairingResponse struct {
@@ -75,7 +87,7 @@ type pairingResponse struct {
 	Server      string `json:"server"`
 	Payload     string `json:"payload"`
 	QRSVG       string `json:"qr_svg"`
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 var errSeveralLibraries = errors.New("several libraries")
@@ -135,7 +147,7 @@ func handlePairingCode(e *core.RequestEvent) error {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": "could not pair"})
 	}
 
-	_, fingerprint, err := loadOrCreateCertificate(e.App.DataDir())
+	fingerprint, err := pairingFingerprint(e)
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": "unavailable"})
 	}
@@ -172,7 +184,7 @@ func pairingPayload(server, token, fingerprint string) string {
 		Version     int    `json:"version"`
 		Server      string `json:"server"`
 		DeviceToken string `json:"device_token"`
-		Fingerprint string `json:"server_fingerprint"`
+		Fingerprint string `json:"server_fingerprint,omitempty"`
 	}{2, server, token, fingerprint})
 	return string(out)
 }

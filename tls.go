@@ -250,18 +250,37 @@ func writePEM(path, kind string, der []byte) error {
 	return file.Close()
 }
 
+// configuredCertificate says whether the settings name a certificate of its
+// own. The commands that run beside the server have no listener to ask, so
+// they decide from the same settings serve does.
+func configuredCertificate() bool { return tlsCert != "" || tlsKey != "" }
+
+// pinnedFingerprint is the certificate a command should expect of the server
+// it talks to: the configured one, read from its file on each run so a
+// renewal is followed, else the one in the data directory.
+func pinnedFingerprint(dir string) (string, error) {
+	if configuredCertificate() {
+		return fingerprintOfFile(tlsCert)
+	}
+	return localFingerprint(dir)
+}
+
 // localFingerprint reads the certificate in dir without touching the key and
 // without making one: the devices commands only check the server they talk
 // to, and a command that quietly minted a certificate would be choosing the
 // server's identity for it.
 func localFingerprint(dir string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, certFile))
+	return fingerprintOfFile(filepath.Join(dir, certFile))
+}
+
+func fingerprintOfFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil || block.Type != "CERTIFICATE" {
-		return "", fmt.Errorf("%s holds no certificate", certFile)
+		return "", fmt.Errorf("%s holds no certificate", path)
 	}
 	return fingerprintOf(block.Bytes), nil
 }

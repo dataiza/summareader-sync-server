@@ -437,3 +437,42 @@ func TestSelfSignedIsUnchangedWithoutSettings(t *testing.T) {
 		t.Fatal("the handshake did not carry the self-signed certificate")
 	}
 }
+
+// The devices command does not start the server, so it pins what the settings
+// name, read from the file on each run.
+func TestDevicesPinsTheConfiguredCertificate(t *testing.T) {
+	savedCert, savedKey := tlsCert, tlsKey
+	t.Cleanup(func() { tlsCert, tlsKey = savedCert, savedKey })
+	m := newMountedPair(t)
+	dataDir := t.TempDir()
+	if _, _, err := loadOrCreateCertificate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	tlsCert, tlsKey = m.CertPath, m.KeyPath
+	got, err := pinnedFingerprint(dataDir)
+	if err != nil || got != fingerprintOf(derIn(t, m.CertPath)) {
+		t.Fatalf("pinned %q, %v: not the configured certificate", got, err)
+	}
+
+	tlsCert, tlsKey = "", ""
+	own, _ := localFingerprint(dataDir)
+	if got, err := pinnedFingerprint(dataDir); err != nil || got != own {
+		t.Fatalf("pinned %q, %v: not the data directory's", got, err)
+	}
+}
+
+func TestConfiguredKeyMissingIsAnError(t *testing.T) {
+	m := newMountedPair(t)
+	_, err := newCertSource(t.TempDir(), m.CertPath, filepath.Join(t.TempDir(), "nope.key"))
+	if err == nil {
+		t.Fatal("a certificate without its key was accepted")
+	}
+}
+
+func TestConfiguredMismatchedPairIsAnError(t *testing.T) {
+	a, b := newMountedPair(t), newMountedPair(t)
+	if _, err := newCertSource(t.TempDir(), a.CertPath, b.KeyPath); err == nil {
+		t.Fatal("a certificate beside another pair's key was accepted")
+	}
+}

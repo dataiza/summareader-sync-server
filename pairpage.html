@@ -27,7 +27,7 @@
 </head>
 <body>
 <h1>Pair a device</h1>
-<p class="muted">The browser warns once about this server's certificate, because no
+<p id="self-signed-note" class="muted" hidden>The browser warns once about this server's certificate, because no
 authority signed it. Compare the fingerprint shown here with the one in the
 server log before trusting either.</p>
 
@@ -39,7 +39,7 @@ server log before trusting either.</p>
 </form>
 
 <form id="pair" hidden>
-  <p>Fingerprint: <code id="state-fingerprint"></code></p>
+  <p id="state-fingerprint-line">Fingerprint: <code id="state-fingerprint"></code></p>
   <label for="label">Device name</label>
   <input id="label" placeholder="A new device">
   <button id="pair-button" type="submit"></button>
@@ -50,7 +50,7 @@ server log before trusting either.</p>
   <p class="warn"><strong>This code is a live device token, shown once.</strong>
   Anyone who scans it can sync with this server. Close the page when the device is paired.</p>
   <div class="qr" id="qr"></div>
-  <p>Fingerprint: <code id="fingerprint"></code></p>
+  <p id="fingerprint-line">Fingerprint: <code id="fingerprint"></code></p>
   <label for="payload">As text</label>
   <textarea id="payload" rows="5" readonly></textarea>
 </section>
@@ -81,7 +81,9 @@ server log before trusting either.</p>
     const state = await response.json().catch(() => null);
     if (!state) { password = ""; return show($("login-error"), "The server said " + response.status + "."); }
     $("password").value = "";
-    $("state-fingerprint").textContent = grouped(state.fingerprint);
+    $("state-fingerprint-line").hidden = !state.fingerprint;
+    $("self-signed-note").hidden = !state.fingerprint;
+    if (state.fingerprint) $("state-fingerprint").textContent = grouped(state.fingerprint);
     $("pair-button").textContent = state.libraries === 0 ? "Create first device" : "Add a device";
     $("login").hidden = true;
     $("pair").hidden = false;
@@ -97,7 +99,8 @@ server log before trusting either.</p>
     if (!response.ok) { return show($("pair-error"), answer.error || "The server said " + response.status + "."); }
     // Our own server's SVG, drawn from nothing but the payload.
     $("qr").innerHTML = answer.qr_svg;
-    $("fingerprint").textContent = grouped(answer.fingerprint);
+    $("fingerprint-line").hidden = !answer.fingerprint;
+    if (answer.fingerprint) $("fingerprint").textContent = grouped(answer.fingerprint);
     $("payload").value = answer.payload;
     $("pair").hidden = true;
     $("result").hidden = false;

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -302,5 +304,55 @@ func TestTwoFirstPressesMakeOneLibrary(t *testing.T) {
 	}
 	if len(devices) != 2 {
 		t.Fatalf("%d devices", len(devices))
+	}
+}
+
+// A certificate an authority signed is checked by the device the way a
+// browser checks one, so there is nothing to pin and nothing to show.
+func TestPairingWithPublicCertificateCarriesNoFingerprint(t *testing.T) {
+	savedCert, savedURL := publicCertificate, publicURL
+	t.Cleanup(func() { publicCertificate, publicURL = savedCert, savedURL })
+	publicCertificate, publicURL = true, "https://sync.example.org/"
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+
+	recorder, err := callPairing(t, app, handlePairingState, http.MethodGet, "h", "op", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if _, there := state["fingerprint"]; there {
+		t.Fatalf("the state carries a fingerprint: %v", state)
+	}
+
+	recorder, err = callPairing(t, app, handlePairingCode, http.MethodPost, "h", "op", `{}`)
+	if err != nil || recorder.Code != http.StatusOK {
+		t.Fatalf("pairing: %v %d", err, recorder.Code)
+	}
+	var answer map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if _, there := answer["fingerprint"]; there {
+		t.Fatal("the answer carries a fingerprint")
+	}
+	if _, err := os.Stat(filepath.Join(app.DataDir(), certFile)); !os.IsNotExist(err) {
+		t.Fatal("a self-signed certificate was made beside the public one")
+	}
+	if answer["server"] != "https://sync.example.org" {
+		t.Fatalf("server is %v", answer["server"])
+	}
+	if strings.Contains(answer["payload"].(string), "server_fingerprint") {
+		t.Fatalf("the payload carries a fingerprint: %v", answer["payload"])
+	}
+}
+
+func TestPairingPayloadOmitsAnEmptyFingerprint(t *testing.T) {
+	got := pairingPayload("s", "tok", "")
+	if got != `{"version":2,"server":"s","device_token":"tok"}` {
+		t.Fatalf("got %s", got)
 	}
 }
