@@ -30,7 +30,7 @@ const serviceType = "_summareader-sync._tcp"
 // A non-empty ip is announced in place of the machine's own addresses. On a
 // host-networked pod those belong to whichever node it landed on and change
 // when it moves; a load balancer's IP does not.
-func announce(addr, instance, ip string) func() {
+func announce(addr, instance, ip, url string) func() {
 	port, err := portOf(addr)
 	if err != nil {
 		log.Printf("not announcing on the network: %v", err)
@@ -45,14 +45,7 @@ func announce(addr, instance, ip string) func() {
 		instance = host
 	}
 
-	// What a client learns before connecting. Deliberately nothing about
-	// the data: this is broadcast to every machine on the network, so it
-	// carries what is needed to reach the server and not one field more.
-	//
-	// The scheme since card 713: every connection is TLS now, and a
-	// device that found this server and spoke plain HTTP to it would be
-	// refused. Its absence is how an older server says http.
-	txt := []string{"software=summareader-sync-server", "scheme=https"}
+	txt := announceTXT(url)
 
 	var server *zeroconf.Server
 	if ip == "" {
@@ -72,6 +65,25 @@ func announce(addr, instance, ip string) func() {
 		log.Printf("announcing %q on the local network as %s", instance, serviceType)
 	}
 	return server.Shutdown
+}
+
+// announceTXT is what a client learns before connecting. Deliberately nothing
+// about the data: this is broadcast to every machine on the network, so it
+// carries what is needed to reach the server and not one field more.
+//
+// The scheme since card 713: every connection is TLS now, and a device that
+// found this server and spoke plain HTTP to it would be refused. Its absence
+// is how an older server says http.
+//
+// The public address is broadcast too, because it is already public (it is in
+// DNS), and a device needs the name for the certificate to match. Left out
+// when there is none, so a server without one announces exactly as before.
+func announceTXT(url string) []string {
+	txt := []string{"software=summareader-sync-server", "scheme=https"}
+	if url != "" {
+		txt = append(txt, "url="+url)
+	}
+	return txt
 }
 
 // portOf pulls the port out of a listen address like "0.0.0.0:8099".

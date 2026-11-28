@@ -121,7 +121,8 @@ func main() {
 		// success in the log and was invisible to every browser on the
 		// network. The process exiting is what withdraws it.
 		if !noAnnounce {
-			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName, announceIP)
+			stopAnnouncing = announce(e.Server.Addr, e.App.Settings().Meta.AppName, announceIP,
+				strings.TrimRight(publicURL, "/"))
 		}
 
 		// TLS on the listener rather than through PocketBase's own https
