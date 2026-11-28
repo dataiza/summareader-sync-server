@@ -1,5 +1,5 @@
 apiVersion: v2
 name: summareader-sync
 description: SummaReader sync server, a small encrypted-blob relay for a person's devices
-version: 1.7.0
-appVersion: "1.7.0"
+version: 2.0.0
+appVersion: "2.0.0"

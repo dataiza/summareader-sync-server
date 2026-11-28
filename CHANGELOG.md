@@ -3,12 +3,13 @@
 The version a release is tagged with is the one in `version.go`, and the
 release workflow refuses to publish without a section here that names it.
 
-## Unreleased
+## 2.0.0
 
 - **A public certificate.** `tls_cert` and `tls_key` (`--tls-cert`/`--tls-key`, `SUMMAREADER_TLS_CERT`/`SUMMAREADER_TLS_KEY`) make the server serve a certificate from a public authority instead of its own. It refuses to start with one and no `publicURL`, re-reads the files when they change so a renewal needs no restart, and keeps the loaded certificate if a re-read fails. With it, pairing codes, `first-device` and the `/pair` page carry no fingerprint, and `devices` pins the configured file's. SummaReader 0.151.0 or later drops a stored pin when the address it was paired with answers as a sync server with a certificate the system trusts for that name; a device stored by a private IP address keeps asking and needs a new pairing code.
 - **The announcement names the public address**: mDNS gains `url=<publicURL>` when `publicURL` is set.
 - **`/pair` lists and removes devices**, through the new `GET /operator/devices` (operator token).
 - **Breaking: the Helm chart's `pairIngress` is removed**, with its Ingress and the Traefik `ServersTransport` it needed. The server's own certificate now makes `/pair` trusted by a browser at the one address. Use `tls.certManager.enabled`, `tls.certManager.clusterIssuer` and `publicURL` instead; `pairIngress` values left in place are ignored.
+- **A configured certificate has to cover `publicURL`.** The server refuses to start when it does not, rather than hand out codes every device would refuse. `first-device` and `devices` refuse half a pair (only `tls_cert` or only `tls_key`), as serve does. The desktop console does not support `tls_cert`: it pins its own certificate and names the LAN address, so use it on Kubernetes or a headless server.
 
 ## 1.7.0
 
