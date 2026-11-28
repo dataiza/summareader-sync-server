@@ -16,6 +16,7 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,8 +131,7 @@ func newCertSource(dataDir, certPath, keyPath string) (*certSource, error) {
 		return &certSource{cert: &cert}, nil
 	}
 	if certPath == "" || keyPath == "" {
-		return nil, errors.New("tls_cert and tls_key must both be set or both " +
-			"be empty; a certificate cannot be served without its key")
+		return nil, errHalfCertificate
 	}
 	stamp, err := stampOf(certPath)
 	if err != nil {
@@ -255,6 +255,36 @@ func writePEM(path, kind string, der []byte) error {
 // they decide from the same settings serve does.
 func configuredCertificate() bool { return tlsCert != "" || tlsKey != "" }
 
+var errHalfCertificate = errors.New("tls_cert and tls_key must both be set or both " +
+	"be empty; a certificate cannot be served without its key")
+
+// checkCertificateSettings is the both-or-neither rule serve applies, for the
+// commands that decide from the same settings: without it one of them would
+// treat half a pair as public mode and then read a file named "".
+func checkCertificateSettings() error {
+	if (tlsCert == "") != (tlsKey == "") {
+		return errHalfCertificate
+	}
+	return nil
+}
+
+// certificateCovers refuses a certificate that does not cover the host of
+// publicURL: every pairing code names that host and a device would reject the
+// handshake, which looks like a dead server rather than a wrong certificate.
+func certificateCovers(cert *tls.Certificate, publicURL string) error {
+	u, err := url.Parse(publicURL)
+	if err != nil || u.Hostname() == "" {
+		return fmt.Errorf("public_url %q has no host to check the certificate against", publicURL)
+	}
+	if cert.Leaf == nil {
+		return errors.New("the configured certificate could not be read")
+	}
+	if err := cert.Leaf.VerifyHostname(u.Hostname()); err != nil {
+		return fmt.Errorf("the certificate in tls_cert does not cover public_url's host: %w", err)
+	}
+	return nil
+}
+
 // pinnedFingerprint is the certificate a command should expect of the server
 // it talks to: the configured one, read from its file on each run so a
 // renewal is followed, else the one in the data directory.
@@ -314,6 +344,10 @@ func pinnedTLS(fp string) *tls.Config {
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
 			if len(raw) == 0 || fingerprintOf(raw[0]) != want {
+				if configuredCertificate() {
+					return errors.New("the server's certificate is not the one in the " +
+						"configured tls_cert file; a renewal may be in progress, so retry in a minute")
+				}
 				return errors.New("the server's certificate is not the one this " +
 					"machine's data directory holds")
 			}

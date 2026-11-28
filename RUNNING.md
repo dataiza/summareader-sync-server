@@ -514,7 +514,9 @@ certificate file and a key file (`tls_cert`/`tls_key`, `--tls-cert`/`--tls-key`,
 `SUMMAREADER_TLS_CERT`/`SUMMAREADER_TLS_KEY`), both or neither. It then refuses
 to start without `publicURL`, since the certificate is for that host and the
 QR must name it. It re-reads the files when they change, so a renewal needs no
-restart.
+restart. Use it on Kubernetes or a headless server, not under the desktop
+console, which pins the certificate in its own data directory and names the LAN
+address.
 
 On Kubernetes, cert-manager makes and renews the certificate:
 

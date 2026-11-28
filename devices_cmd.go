@@ -67,7 +67,14 @@ func registerDeviceCommands(app *pocketbase.PocketBase) {
 		}
 		client := &http.Client{Timeout: 5 * time.Second}
 		if strings.HasPrefix(base, "https://") {
+			if err := checkCertificateSettings(); err != nil {
+				return nil, err
+			}
 			fp, err := pinnedFingerprint(app.DataDir())
+			if err != nil && configuredCertificate() {
+				return nil, fmt.Errorf("nothing to check the server's certificate "+
+					"against (%w); the file named by tls_cert may be mid-renewal, so retry in a minute", err)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("nothing to check the server's certificate "+
 					"against (%w); pass --dir if the server keeps its data elsewhere", err)

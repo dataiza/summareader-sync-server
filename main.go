@@ -143,6 +143,12 @@ func main() {
 		if publicCertificate && publicURL == "" {
 			return errPublicCertificateNeedsURL
 		}
+		if publicCertificate {
+			cert, _ := source.GetCertificate(nil)
+			if err := certificateCovers(cert, publicURL); err != nil {
+				return err
+			}
+		}
 		addr := e.Server.Addr
 		if addr == "" {
 			addr = "127.0.0.1:8090"
@@ -961,6 +967,9 @@ func registerCommands(app *pocketbase.PocketBase) {
 			}
 
 			// Before the library is made, so a refusal leaves nothing behind.
+			if err := checkCertificateSettings(); err != nil {
+				log.Fatal(err)
+			}
 			if configuredCertificate() && publicURL == "" {
 				log.Fatal(errPublicCertificateNeedsURL)
 			}

@@ -102,7 +102,7 @@ server log before trusting either.</p>
       const row = el("li");
       row.append(el("strong", device.label || "(no name)"));
       if (device.revoked) row.append(" ", el("span", "Revoked", "warn"));
-      const seen = device.last_seen ? new Date(device.last_seen).toLocaleString() : "never";
+      const seen = device.last_seen ? new Date(device.last_seen.replace(" ", "T")).toLocaleString() : "never";
       const details = ["Last seen " + seen, device.client || "build unknown",
         device.entries + (device.entries === 1 ? " entry" : " entries")];
       row.append(el("div", details.join(" · "), "muted"));
