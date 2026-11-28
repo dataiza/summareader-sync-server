@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"os"
@@ -70,6 +71,116 @@ func loadOrCreateCertificate(dir string) (tls.Certificate, string, error) {
 				"missing, and making a new pair would change this server's "+
 				"fingerprint under every paired device", certPath, keyPath)
 	}
+}
+
+// Set when serve is given a certificate of its own through tls_cert and
+// tls_key. A device then trusts it through an authority, as a browser does,
+// and a pairing code has no fingerprint to carry.
+var publicCertificate bool
+
+// How often a configured certificate's file is looked at for a renewal. A
+// stat per handshake would cost nothing much, but a renewal comes every few
+// weeks, and half a minute late is not late.
+var certCheckEvery = 30 * time.Second
+
+// certSource is the certificate serve hands to every handshake.
+//
+// The self-signed pair never changes, so for it this only holds the one
+// certificate. A configured pair is replaced on disk when it is renewed, by
+// cert-manager through a Secret volume, and is read again when the
+// certificate file changes; a server that needed restarting for that would
+// stop being trusted on the day the old certificate expired.
+type certSource struct {
+	certPath, keyPath string
+
+	mu      sync.Mutex
+	cert    *tls.Certificate
+	stamp   fileStamp
+	checked time.Time
+}
+
+// fileStamp is what a renewal changes. Read with os.Stat, which follows a
+// symlink: a Secret volume renews by pointing ..data at a new directory, and
+// the link itself never changes.
+type fileStamp struct {
+	modified time.Time
+	size     int64
+}
+
+func stampOf(path string) (fileStamp, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, err
+	}
+	return fileStamp{info.ModTime(), info.Size()}, nil
+}
+
+// newCertSource serves the configured pair when certPath and keyPath are set,
+// and the data directory's self-signed one when neither is.
+//
+// A configured pair that cannot be read is an error, never a reason to fall
+// back to the self-signed one. Devices told to trust an authority would refuse
+// it, and a server that will not start says why where a fallback would not.
+func newCertSource(dataDir, certPath, keyPath string) (*certSource, error) {
+	if certPath == "" && keyPath == "" {
+		cert, _, err := loadOrCreateCertificate(dataDir)
+		if err != nil {
+			return nil, err
+		}
+		return &certSource{cert: &cert}, nil
+	}
+	if certPath == "" || keyPath == "" {
+		return nil, errors.New("tls_cert and tls_key must both be set or both " +
+			"be empty; a certificate cannot be served without its key")
+	}
+	stamp, err := stampOf(certPath)
+	if err != nil {
+		return nil, err
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, err
+	}
+	return &certSource{
+		certPath: certPath, keyPath: keyPath,
+		cert: &cert, stamp: stamp, checked: time.Now(),
+	}, nil
+}
+
+// GetCertificate never fails a handshake over a renewal. A pair that does
+// not load is most often one caught halfway through being written, the new
+// certificate beside the old key, so the one already loaded keeps serving
+// and the stamp is left alone for the next check to try again.
+func (s *certSource) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.certPath == "" || time.Since(s.checked) < certCheckEvery {
+		return s.cert, nil
+	}
+	s.checked = time.Now()
+	stamp, err := stampOf(s.certPath)
+	if err == nil && stamp == s.stamp {
+		return s.cert, nil
+	}
+	if err == nil {
+		var cert tls.Certificate
+		cert, err = tls.LoadX509KeyPair(s.certPath, s.keyPath)
+		if err == nil {
+			s.cert, s.stamp = &cert, stamp
+			log.Printf("certificate reloaded; expires %s",
+				cert.Leaf.NotAfter.Format(time.RFC3339))
+			return s.cert, nil
+		}
+	}
+	log.Printf("certificate reload failed: %v", err)
+	return s.cert, nil
+}
+
+// Fingerprint is the SHA-256 of the certificate being served now.
+func (s *certSource) Fingerprint() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fingerprintOf(s.cert.Certificate[0])
 }
 
 func readCertificate(certPath, keyPath string) (tls.Certificate, string, error) {
@@ -200,10 +311,10 @@ func pinnedTLS(fp string) *tls.Config {
 // decided by its first byte: a TLS handshake always opens with 0x16, and no
 // HTTP method does. Plain HTTP is for one transition release only, for devices
 // whose app predates this card and cannot speak anything else.
-func secureListener(raw net.Listener, cert tls.Certificate, insecure bool) net.Listener {
+func secureListener(raw net.Listener, get func(*tls.ClientHelloInfo) (*tls.Certificate, error), insecure bool) net.Listener {
 	config := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
+		MinVersion:     tls.VersionTLS12,
+		GetCertificate: get,
 	}
 	if !insecure {
 		return tls.NewListener(raw, config)

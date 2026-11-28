@@ -45,6 +45,10 @@ var announceIP string
 // page, not by anything here.
 var publicURL string
 
+// Set by --tls-cert and --tls-key: a certificate to serve instead of the
+// self-signed one. See newCertSource.
+var tlsCert, tlsKey string
+
 // Held for the life of the process. See the comment in OnServe.
 var stopAnnouncing = func() {}
 
@@ -124,9 +128,19 @@ func main() {
 		// public domain name — the one thing a server on a home network has
 		// not got. PocketBase serves whatever listener it is handed, and this
 		// one decrypts. Card 713.
-		cert, fp, err := loadOrCreateCertificate(e.App.DataDir())
+		//
+		// A configured certificate is issued for a name, and a pairing code
+		// carrying no fingerprint names only publicURL. Without one the code
+		// would name whatever host the request came in on, which the
+		// certificate need not cover.
+		source, err := newCertSource(e.App.DataDir(), tlsCert, tlsKey)
 		if err != nil {
 			return err
+		}
+		publicCertificate = tlsCert != ""
+		if publicCertificate && publicURL == "" {
+			return errors.New("tls_cert needs public_url: a pairing code then " +
+				"names that address, and the certificate has to cover it")
 		}
 		addr := e.Server.Addr
 		if addr == "" {
@@ -136,7 +150,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		e.Listener = secureListener(raw, cert, insecureHTTP)
+		e.Listener = secureListener(raw, source.GetCertificate, insecureHTTP)
 		// The first-run link to create an administrator is built by
 		// PocketBase as http://, from the same flag that decides its own TLS,
 		// and would lead to a page this listener refuses.
@@ -146,8 +160,16 @@ func main() {
 		}
 		// Printed every start, because it is what somebody compares against
 		// the question a device asks, and the log is where they will look.
-		log.Printf("serving https on %s; certificate fingerprint (SHA-256) %s",
-			addr, displayFingerprint(fp))
+		// A configured certificate is checked by an authority, not by eye,
+		// so its line says where it came from and when it runs out instead.
+		if publicCertificate {
+			cert, _ := source.GetCertificate(nil)
+			log.Printf("serving https on %s; certificate from %s, expires %s",
+				addr, tlsCert, cert.Leaf.NotAfter.Format(time.RFC3339))
+		} else {
+			log.Printf("serving https on %s; certificate fingerprint (SHA-256) %s",
+				addr, displayFingerprint(source.Fingerprint()))
+		}
 		if insecureHTTP {
 			log.Printf("also answering plain http on the same port " +
 				"(--insecure-http): tokens from devices still using it cross " +
@@ -183,6 +205,14 @@ func main() {
 	app.RootCmd.PersistentFlags().StringVar(&publicURL, "public-url",
 		settings.PublicURL,
 		"the address a pairing code carries, e.g. https://sync.example:8099")
+
+	// Both on the root for the reason above.
+	app.RootCmd.PersistentFlags().StringVar(&tlsCert, "tls-cert",
+		settings.TLSCert,
+		"serve this PEM certificate instead of the self-signed one (with --tls-key)")
+	app.RootCmd.PersistentFlags().StringVar(&tlsKey, "tls-key",
+		settings.TLSKey,
+		"the PEM key for --tls-cert")
 
 	// Who to stop with. A persistent flag on the root for the reason above, and
 	// passed only by a console that started this server as its own child — a

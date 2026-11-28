@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
+	"encoding/pem"
 	"io"
 	"net"
 	"net/http"
@@ -105,7 +107,7 @@ func listenFor(t *testing.T, insecure bool) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln := secureListener(raw, cert, insecure)
+	ln := secureListener(raw, func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }, insecure)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "hello")
 	})}
@@ -214,5 +216,224 @@ func TestTheLocalFingerprintIsTheServedOne(t *testing.T) {
 	got, err := localFingerprint(dir)
 	if err != nil || got != fp {
 		t.Fatalf("read %q, %v; want %q", got, err, fp)
+	}
+}
+
+// A pair the way a Kubernetes Secret volume holds one: the names everybody
+// reads are symlinks through ..data, and a renewal points ..data at a new
+// directory rather than writing the files in place.
+type mountedPair struct {
+	dir      string
+	versions int
+	CertPath string
+	KeyPath  string
+}
+
+func newMountedPair(t *testing.T) *mountedPair {
+	t.Helper()
+	m := &mountedPair{dir: t.TempDir()}
+	m.CertPath = filepath.Join(m.dir, "tls.crt")
+	m.KeyPath = filepath.Join(m.dir, "tls.key")
+	m.publish(t, m.fresh(t))
+	for _, name := range []string{"tls.crt", "tls.key"} {
+		if err := os.Symlink(filepath.Join("..data", name), filepath.Join(m.dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return m
+}
+
+// fresh makes a new self-signed pair in a version directory of its own and
+// returns that directory, not yet published.
+func (m *mountedPair) fresh(t *testing.T) string {
+	t.Helper()
+	m.versions++
+	version := filepath.Join(m.dir, "..v"+string(rune('0'+m.versions)))
+	if err := writeCertificate(filepath.Join(version, "tls.crt"), filepath.Join(version, "tls.key")); err != nil {
+		t.Fatal(err)
+	}
+	// Later than anything before it, so the check cannot miss it on a
+	// filesystem whose clock is coarser than a test runs.
+	later := time.Now().Add(time.Duration(m.versions) * time.Minute)
+	for _, name := range []string{"tls.crt", "tls.key"} {
+		if err := os.Chtimes(filepath.Join(version, name), later, later); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return version
+}
+
+// publish swaps ..data to version in one rename, as the kubelet does.
+func (m *mountedPair) publish(t *testing.T, version string) {
+	t.Helper()
+	tmp := filepath.Join(m.dir, "..data_tmp")
+	if err := os.Symlink(filepath.Base(version), tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, filepath.Join(m.dir, "..data")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func derIn(t *testing.T, certPath string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		t.Fatalf("%s holds no certificate", certPath)
+	}
+	return block.Bytes
+}
+
+// servedDER is what a device sees: one handshake through the listener serve
+// builds, and the certificate that came back.
+func servedDER(t *testing.T, source *certSource) []byte {
+	t.Helper()
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln := secureListener(raw, source.GetCertificate, false)
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.(*tls.Conn).Handshake()
+	}()
+	conn, err := tls.Dial("tcp", raw.Addr().String(), &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	return conn.ConnectionState().PeerCertificates[0].Raw
+}
+
+func checkEveryHandshake(t *testing.T) {
+	saved := certCheckEvery
+	certCheckEvery = 0
+	t.Cleanup(func() { certCheckEvery = saved })
+}
+
+func TestConfiguredCertificateIsServed(t *testing.T) {
+	m := newMountedPair(t)
+	source, err := newCertSource(t.TempDir(), m.CertPath, m.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := derIn(t, m.CertPath)
+	if got := servedDER(t, source); string(got) != string(want) {
+		t.Fatal("the handshake did not carry the configured certificate")
+	}
+	if source.Fingerprint() != fingerprintOf(want) {
+		t.Fatal("the fingerprint is not the configured certificate's")
+	}
+}
+
+func TestConfiguredCertificateMustBeAPair(t *testing.T) {
+	m := newMountedPair(t)
+	for _, paths := range [][2]string{{m.CertPath, ""}, {"", m.KeyPath}} {
+		_, err := newCertSource(t.TempDir(), paths[0], paths[1])
+		if err == nil {
+			t.Fatalf("half a pair %q was accepted", paths)
+		}
+		if !strings.Contains(err.Error(), "tls_cert") || !strings.Contains(err.Error(), "tls_key") {
+			t.Fatalf("the error does not name both settings: %v", err)
+		}
+	}
+}
+
+// No fallback: a server told to serve a certificate it cannot find stops,
+// rather than quietly minting one nobody asked for.
+func TestConfiguredCertificateMissingIsAnError(t *testing.T) {
+	dataDir := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "nope")
+	if _, err := newCertSource(dataDir, missing+".crt", missing+".key"); err == nil {
+		t.Fatal("a missing pair was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, certFile)); !os.IsNotExist(err) {
+		t.Fatal("a self-signed certificate was made in its place")
+	}
+}
+
+func TestConfiguredCertificateIsReloaded(t *testing.T) {
+	checkEveryHandshake(t)
+	m := newMountedPair(t)
+	source, err := newCertSource(t.TempDir(), m.CertPath, m.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := servedDER(t, source)
+
+	m.publish(t, m.fresh(t))
+	want := derIn(t, m.CertPath)
+	if string(want) == string(first) {
+		t.Fatal("the test did not change the certificate")
+	}
+	if got := servedDER(t, source); string(got) != string(want) {
+		t.Fatal("the renewed certificate was not picked up")
+	}
+	if source.Fingerprint() != fingerprintOf(want) {
+		t.Fatal("the fingerprint did not follow the renewal")
+	}
+}
+
+// Written one file after the other, a renewal is briefly a new certificate
+// beside the old key. That moment must serve the old pair, and the moment
+// after it the new one.
+func TestHalfRenewedCertificateKeepsTheOld(t *testing.T) {
+	checkEveryHandshake(t)
+	m := newMountedPair(t)
+	source, err := newCertSource(t.TempDir(), m.CertPath, m.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := servedDER(t, source)
+
+	renewed := m.fresh(t)
+	oldKey, err := os.ReadFile(m.KeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, err := os.ReadFile(filepath.Join(renewed, "tls.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(renewed, "tls.key"), oldKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.publish(t, renewed)
+	if got := servedDER(t, source); string(got) != string(old) {
+		t.Fatal("a certificate without its key replaced the working one")
+	}
+
+	if err := os.WriteFile(filepath.Join(renewed, "tls.key"), newKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := servedDER(t, source); string(got) != string(derIn(t, m.CertPath)) {
+		t.Fatal("the matched pair was not picked up once the key arrived")
+	}
+}
+
+func TestSelfSignedIsUnchangedWithoutSettings(t *testing.T) {
+	dir := t.TempDir()
+	source, err := newCertSource(dir, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fp, err := loadOrCreateCertificate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.Fingerprint() != fp {
+		t.Fatalf("got %s, want the data directory's %s", source.Fingerprint(), fp)
+	}
+	if got := servedDER(t, source); fingerprintOf(got) != fp {
+		t.Fatal("the handshake did not carry the self-signed certificate")
 	}
 }

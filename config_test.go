@@ -347,3 +347,22 @@ func TestAnnounceIPAndPublicURL(t *testing.T) {
 		t.Fatalf("environment did not win: %+v", cfg)
 	}
 }
+
+func TestTLSSettingsFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, `{"tls_cert":"/file/tls.crt","tls_key":"/file/tls.key"}`)
+	cfg, err := resolveConfig([]string{"x", "serve", "--dir=" + dir}, envOf(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TLSCert != "/file/tls.crt" || cfg.TLSKey != "/file/tls.key" {
+		t.Fatalf("file was not read: %+v", cfg)
+	}
+	cfg, _ = resolveConfig([]string{"x", "serve", "--dir=" + dir}, envOf(map[string]string{
+		"SUMMAREADER_TLS_CERT": " /tls/tls.crt\n",
+		"SUMMAREADER_TLS_KEY":  " /tls/tls.key ",
+	}))
+	if cfg.TLSCert != "/tls/tls.crt" || cfg.TLSKey != "/tls/tls.key" {
+		t.Fatalf("environment did not win: %+v", cfg)
+	}
+}

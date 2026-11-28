@@ -13,5 +13,9 @@
   "_public_url": "The address a pairing code carries: scheme, host and port (a path is kept), e.g. https://sync.example:8099. Also --public-url and SUMMAREADER_PUBLIC_URL. Empty uses the host the request arrived on.",
   "public_url": "",
   "_insecure_http": "Also answer plain HTTP beside HTTPS on the same port, for devices whose app predates encrypted sync. Also --insecure-http and SUMMAREADER_INSECURE_HTTP. Tokens from those devices cross the network readable by anyone on it, so take it off once every device is updated; it is there for one release only. See RUNNING.md, Moving an existing server to HTTPS.",
-  "insecure_http": false
+  "insecure_http": false,
+  "_tls_cert": "A PEM certificate to serve instead of the self-signed one, e.g. /tls/tls.crt as cert-manager mounts it. Also --tls-cert and SUMMAREADER_TLS_CERT. Needs tls_key beside it and public_url set to an address it covers; the server will not start otherwise. Re-read when the file changes, so a renewal needs no restart. Empty serves the self-signed pair in the data directory.",
+  "tls_cert": "",
+  "_tls_key": "The PEM key for tls_cert, e.g. /tls/tls.key. Also --tls-key and SUMMAREADER_TLS_KEY.",
+  "tls_key": ""
 }

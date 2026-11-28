@@ -59,6 +59,12 @@ type Config struct {
 	// 713. Here as well as on the command line so that a server installed as
 	// a unit can be given it without rewriting the unit.
 	InsecureHTTP bool `json:"insecure_http,omitempty"`
+	// A certificate and its key to serve instead of the self-signed pair,
+	// as PEM files: what cert-manager mounts from a Secret. Both or neither.
+	// Re-read when the certificate file changes, so a renewal needs no
+	// restart. Empty serves the self-signed pair in the data directory.
+	TLSCert string `json:"tls_cert,omitempty"`
+	TLSKey  string `json:"tls_key,omitempty"`
 	// How long /subscribe holds a request open, in seconds.
 	//
 	// Zero — the default — means [defaultHold]. A deliberate zero is spelled
@@ -185,6 +191,12 @@ func resolveConfig(args []string, getenv env) (Config, error) {
 	}
 	if v := strings.TrimSpace(getenv("SUMMAREADER_PUBLIC_URL")); v != "" {
 		cfg.PublicURL = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_TLS_CERT")); v != "" {
+		cfg.TLSCert = v
+	}
+	if v := strings.TrimSpace(getenv("SUMMAREADER_TLS_KEY")); v != "" {
+		cfg.TLSKey = v
 	}
 	if v := getenv("SUMMAREADER_NO_ANNOUNCE"); v != "" {
 		cfg.NoAnnounce = truthy(v)
