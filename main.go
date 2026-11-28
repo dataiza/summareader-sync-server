@@ -437,6 +437,8 @@ func registerRoutes(e *core.ServeEvent) {
 	e.Router.GET("/operator/pairing", handlePairingState)
 	// The code itself: the first library, or a token into the one there is.
 	e.Router.POST("/operator/pairing", handlePairingCode)
+	// Every device, for the page's list; its buttons use the routes above.
+	e.Router.GET("/operator/devices", handleOperatorDevices)
 
 	// Not part of the contract — it exists so a client can tell "wrong URL"
 	// from "right URL, no data", which §9.3 turns into four different prompts.

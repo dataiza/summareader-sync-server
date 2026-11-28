@@ -356,3 +356,73 @@ func TestPairingPayloadOmitsAnEmptyFingerprint(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+// Review Focus 3: the metrics token reads the console's overview, and must
+// not open the page's list, whose password is the operator token alone.
+func TestOperatorDevicesWantsTheOperatorToken(t *testing.T) {
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_METRICS_TOKEN", "metrics")
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "")
+	_, err := callPairing(t, app, handleOperatorDevices, http.MethodGet, "h", "metrics", "")
+	if apiStatus(err) != http.StatusNotFound {
+		t.Fatalf("no operator token: got %v, want a 404", err)
+	}
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	for _, token := range []string{"wrong", "metrics"} {
+		_, err = callPairing(t, app, handleOperatorDevices, http.MethodGet, "h", token, "")
+		if apiStatus(err) != http.StatusUnauthorized {
+			t.Fatalf("got %v, want a 401", err)
+		}
+	}
+}
+
+func TestOperatorDevicesListsEveryDevice(t *testing.T) {
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	first, err := createAccount(app, "My library", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := enrollDevice(app, first.AccountID, "Laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := callPairing(t, app, handleOperatorDevices, http.MethodGet, "h", "op", "")
+	if err != nil || recorder.Code != http.StatusOK {
+		t.Fatalf("list: %v %d", err, recorder.Code)
+	}
+	var answer struct {
+		Devices []overviewDevice `json:"devices"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, d := range answer.Devices {
+		ids[d.ID] = true
+	}
+	if len(answer.Devices) != 2 || !ids[first.DeviceID] || !ids[second.DeviceID] {
+		t.Fatalf("devices = %+v", answer.Devices)
+	}
+}
+
+func TestOperatorDevicesRefusesPlainHTTP(t *testing.T) {
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	event := &core.RequestEvent{App: app}
+	event.Request = httptest.NewRequest(http.MethodGet, "/operator/devices", nil)
+	event.Request.Header.Set("Authorization", "Bearer op")
+	event.Response = httptest.NewRecorder()
+	if apiStatus(handleOperatorDevices(event)) != http.StatusNotFound {
+		t.Fatal("plain HTTP was served")
+	}
+}
+
+func TestOperatorDevicesIsNotCached(t *testing.T) {
+	app := emptyTestApp(t)
+	t.Setenv("SUMMAREADER_OPERATOR_TOKEN", "op")
+	recorder, err := callPairing(t, app, handleOperatorDevices, http.MethodGet, "h", "op", "")
+	if err != nil || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("the list may be cached: %v", err)
+	}
+}

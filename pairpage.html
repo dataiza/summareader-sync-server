@@ -22,6 +22,9 @@
   code, textarea { font-family: ui-monospace, monospace; word-break: break-all; }
   textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
              border: 1px solid var(--line); border-radius: .4rem; padding: .5rem; }
+  #device-list { list-style: none; padding: 0; }
+  #device-list li { border-top: 1px solid var(--line); padding: .5rem 0; }
+  #device-list button { width: auto; padding: .3rem .7rem; margin: .3rem .3rem 0 0; }
   [hidden] { display: none; }
 </style>
 </head>
@@ -55,6 +58,12 @@ server log before trusting either.</p>
   <textarea id="payload" rows="5" readonly></textarea>
 </section>
 
+<section id="devices" hidden>
+  <h2>Devices</h2>
+  <p id="devices-error" class="warn" hidden></p>
+  <ul id="device-list"></ul>
+</section>
+
 <script>
   // The password lives here and nowhere else: not in storage, not in the URL.
   let password = "";
@@ -63,12 +72,69 @@ server log before trusting either.</p>
   const grouped = (hex) => hex.toUpperCase().match(/.{1,2}/g).join(":");
   const show = (el, text) => { el.textContent = text; el.hidden = !text; };
 
-  const call = (method, body) => fetch("/operator/pairing", {
+  const api = (method, path, body) => fetch(path, {
     method,
     headers: { "Authorization": "Bearer " + password, "Content-Type": "application/json" },
     body: body && JSON.stringify(body),
     cache: "no-store",
   });
+  const call = (method, body) => api(method, "/operator/pairing", body);
+
+  // Each row is built with textContent, so a label is shown as the text it is
+  // whatever characters it holds.
+  const el = (tag, text, className) => {
+    const node = document.createElement(tag);
+    if (text) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  };
+
+  async function loadDevices() {
+    let response;
+    try { response = await api("GET", "/operator/devices"); }
+    catch { return show($("devices-error"), "The server did not answer."); }
+    const answer = await response.json().catch(() => null);
+    if (!response.ok || !answer) { return show($("devices-error"), "The server said " + response.status + "."); }
+    const list = $("device-list");
+    list.replaceChildren();
+    if (answer.devices.length === 0) list.append(el("li", "No devices yet.", "muted"));
+    for (const device of answer.devices) {
+      const row = el("li");
+      row.append(el("strong", device.label || "(no name)"));
+      if (device.revoked) row.append(" ", el("span", "Revoked", "warn"));
+      const seen = device.last_seen ? new Date(device.last_seen).toLocaleString() : "never";
+      const details = ["Last seen " + seen, device.client || "build unknown",
+        device.entries + (device.entries === 1 ? " entry" : " entries")];
+      row.append(el("div", details.join(" · "), "muted"));
+      const button = (text, action) => {
+        const b = el("button", text);
+        b.type = "button";
+        b.addEventListener("click", action);
+        row.append(b);
+      };
+      button("Rename", () => {
+        const label = prompt("New name for this device", device.label);
+        if (label !== null && label.trim()) act("/operator/rename", { device: device.id, label });
+      });
+      if (device.revoked) button("Resume", () => act("/operator/resume", { device: device.id }));
+      else button("Revoke", () => act("/operator/revoke", { device: device.id }));
+      button("Remove", () => {
+        if (confirm("Remove “" + device.label + "”? It has to pair again to sync. What it has already downloaded stays on it."))
+          act("/operator/remove", { device: device.id });
+      });
+      list.append(row);
+    }
+    show($("devices-error"), "");
+  }
+
+  async function act(path, body) {
+    let response;
+    try { response = await api("POST", path, body); }
+    catch { return show($("devices-error"), "The server did not answer."); }
+    const answer = await response.json().catch(() => ({}));
+    await loadDevices();
+    if (!response.ok) show($("devices-error"), answer.error || "The server said " + response.status + ".");
+  }
 
   $("login").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -87,6 +153,8 @@ server log before trusting either.</p>
     $("pair-button").textContent = state.libraries === 0 ? "Create first device" : "Add a device";
     $("login").hidden = true;
     $("pair").hidden = false;
+    $("devices").hidden = false;
+    loadDevices();
   });
 
   $("pair").addEventListener("submit", async (event) => {
@@ -104,6 +172,7 @@ server log before trusting either.</p>
     $("payload").value = answer.payload;
     $("pair").hidden = true;
     $("result").hidden = false;
+    loadDevices();
   });
 </script>
 </body>

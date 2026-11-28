@@ -210,3 +210,22 @@ func qrSVG(payload string) (string, error) {
 	svg.WriteString(`</svg>`)
 	return svg.String(), nil
 }
+
+// The console's device list, for the page: the same rows /overview
+// gives, on the operator token rather than the metrics one, because this page
+// renames and removes and the metrics token is meant to be handed to a
+// dashboard.
+func handleOperatorDevices(e *core.RequestEvent) error {
+	noStore(e)
+	if plainHTTP(e) {
+		return e.NotFoundError("", nil)
+	}
+	if ok, err := operatorOK(e); !ok {
+		return err
+	}
+	out, err := collectOverview(e.App)
+	if err != nil {
+		return e.JSON(http.StatusInternalServerError, map[string]string{"error": "unavailable"})
+	}
+	return e.JSON(http.StatusOK, map[string]any{"devices": out.Devices})
+}
